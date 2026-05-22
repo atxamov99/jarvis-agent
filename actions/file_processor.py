@@ -25,7 +25,9 @@ import tempfile
 from pathlib import Path
 from datetime import datetime
 
-import google.generativeai as genai
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+import google.generativeai as _old_genai
 
 
 def _get_api_key() -> str:
@@ -35,8 +37,8 @@ def _get_api_key() -> str:
 
 
 def _gemini_client():
-    genai.configure(api_key=_get_api_key())
-    return genai.GenerativeModel("gemini-2.5-flash")
+    _old_genai.configure(api_key=_get_api_key())
+    return _old_genai.GenerativeModel("gemini-2.5-flash")
 
 
 def _detect_type(path: Path) -> str:

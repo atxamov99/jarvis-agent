@@ -1,3 +1,7 @@
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 import asyncio
 import re
 import threading
@@ -6,6 +10,15 @@ import sys
 import traceback
 from pathlib import Path
 
+# Fix Windows terminal encoding so emojis/Cyrillic don't crash
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+import numpy as np
 import sounddevice as sd
 from google import genai
 from google.genai import types
@@ -57,6 +70,12 @@ SEND_SAMPLE_RATE    = 16000
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE          = 1024
 
+# Noise gate — filters background noise, knocks, brief transients
+# Each frame = CHUNK_SIZE/SEND_SAMPLE_RATE = ~64 ms
+_GATE_OPEN_RMS    = 450    # RMS level required to consider audio "active"
+_GATE_ATTACK      = 3      # frames (~192 ms) above threshold before gate opens
+_GATE_HOLD        = 28     # frames (~1.8 s) gate stays open after level drops
+
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)["gemini_api_key"]
@@ -107,7 +126,7 @@ TOOL_DECLARATIONS = [
             "technical/programming questions, product comparisons, or ANY 'who/what/when/where/why/how' question. "
             "NEVER say 'I don't know' or 'I can't access the internet' — call this tool instead. "
             "When the user asks something factual that you don't have memorized, call web_search immediately. "
-            "After getting results, summarize them BRIEFLY in Uzbek (2-4 sentences)."
+            "After getting results, summarize them BRIEFLY in the SAME language the user spoke (2-4 sentences)."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -480,7 +499,7 @@ TOOL_DECLARATIONS = [
             "When the user gives an EXPLICIT save command, confirm BRIEFLY in Uzbek (e.g. 'Eslab qoldim.') after calling the tool. "
             "When called silently (no explicit request), do NOT announce. "
             "Do NOT call for: weather, reminders, searches, or one-time commands. "
-            "Values must be in English regardless of the conversation language."
+            "Values should be concise and clear — any language is fine."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -548,6 +567,28 @@ TOOL_DECLARATIONS = [
             "required": ["scope"]
         }
     },
+    {
+        "name": "toggle_mute",
+        "description": (
+            "Mute or unmute the microphone. "
+            "TRIGGER when user says: 'молчать', 'замолчи', 'тихо', 'выключи микрофон', "
+            "'mute', 'shut up', 'be quiet', 'silence', 'unmute', 'включи микрофон', "
+            "'speak', 'говори'. "
+            "Use action='mute' to mute, action='unmute' to unmute. "
+            "After muting say a short goodbye (1 sentence max). "
+            "After unmuting say a short hello."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "mute | unmute"
+                }
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -562,6 +603,11 @@ class JarvisLive:
         self._speaking_lock = threading.Lock()
         self.ui.on_text_command = self._on_text_command
         self._turn_done_event: asyncio.Event | None = None
+
+        # Noise gate state (per-frame counters, safe inside GIL)
+        self._gate_open         = False
+        self._gate_attack_count = 0
+        self._gate_hold_count   = 0
 
         # Wake-word detector ("hey jarvis"). Starts muted; unmutes on wake.
         self._wake_detector = None
@@ -628,7 +674,7 @@ class JarvisLive:
     def speak_error(self, tool_name: str, error: str):
         short = str(error)[:120]
         self.ui.write_log(f"ERR: {tool_name} — {short}")
-        self.speak(f"Sir, {tool_name} encountered an error. {short}")
+        self.speak(f"Tool '{tool_name}' failed: {short}. What should I do next?")
 
     def _build_config(self) -> types.LiveConnectConfig:
         from datetime import datetime
@@ -803,6 +849,15 @@ class JarvisLive:
                 r = await loop.run_in_executor(None, lambda: flight_finder(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "toggle_mute":
+                action = args.get("action", "mute").lower()
+                if action == "mute":
+                    self.ui.muted = True
+                    result = "Microphone muted."
+                else:
+                    self.ui.muted = False
+                    result = "Microphone active."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("Goodbye, sir.")
@@ -850,11 +905,27 @@ class JarvisLive:
                     print(f"[WakeWord] feed error: {e}")
 
             if not jarvis_speaking and not self.ui.muted:
-                data = indata.tobytes()
-                loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
-                )
+                # Noise gate: reject background noise and brief transients
+                arr = np.frombuffer(indata, dtype=np.int16)
+                rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
+
+                if rms >= _GATE_OPEN_RMS:
+                    self._gate_attack_count += 1
+                    if self._gate_attack_count >= _GATE_ATTACK:
+                        self._gate_open = True
+                    self._gate_hold_count = _GATE_HOLD
+                else:
+                    self._gate_attack_count = 0
+                    if self._gate_hold_count > 0:
+                        self._gate_hold_count -= 1
+                    else:
+                        self._gate_open = False
+
+                if self._gate_open:
+                    loop.call_soon_threadsafe(
+                        self.out_queue.put_nowait,
+                        {"data": indata.tobytes(), "mime_type": "audio/pcm"}
+                    )
 
         try:
             with sd.InputStream(
