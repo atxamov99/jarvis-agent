@@ -72,8 +72,8 @@ CHUNK_SIZE          = 1024
 
 # Noise gate — filters background noise, knocks, brief transients
 # Each frame = CHUNK_SIZE/SEND_SAMPLE_RATE = ~64 ms
-_GATE_OPEN_RMS    = 450    # RMS level required to consider audio "active"
-_GATE_ATTACK      = 3      # frames (~192 ms) above threshold before gate opens
+_GATE_OPEN_RMS    = 80     # RMS level required to consider audio "active"
+_GATE_ATTACK      = 2      # frames (~128 ms) above threshold before gate opens
 _GATE_HOLD        = 28     # frames (~1.8 s) gate stays open after level drops
 
 def _get_api_key() -> str:
