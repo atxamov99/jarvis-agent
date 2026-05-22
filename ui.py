@@ -987,6 +987,7 @@ class SetupOverlay(QWidget):
 class MainWindow(QMainWindow):
     _log_sig   = pyqtSignal(str)
     _state_sig = pyqtSignal(str)
+    _mute_sig  = pyqtSignal(bool)
 
     def __init__(self, face_path: str):
         super().__init__()
@@ -1045,6 +1046,7 @@ class MainWindow(QMainWindow):
 
         self._log_sig.connect(self._log.append_log)
         self._state_sig.connect(self._apply_state)
+        self._mute_sig.connect(self._set_muted_safe)
 
         self._overlay: SetupOverlay | None = None
         self._ready = self._check_config()
@@ -1384,6 +1386,11 @@ class MainWindow(QMainWindow):
             self._apply_state("LISTENING")
             self._log.append_log("SYS: Microphone active.")
 
+    def _set_muted_safe(self, v: bool):
+        """Thread-safe mute setter — invoked via _mute_sig (Qt-queued)."""
+        if v != self._muted:
+            self._toggle_mute()
+
     def _style_mute_btn(self):
         if self._muted:
             self._mute_btn.setText("🔇  MICROPHONE MUTED")
@@ -1472,8 +1479,9 @@ class JarvisUI:
 
     @muted.setter
     def muted(self, v: bool):
-        if v != self._win._muted:
-            self._win._toggle_mute()
+        # Thread-safe: emit Qt signal → slot runs in GUI thread.
+        # Calling _toggle_mute() directly from a worker thread crashes Qt.
+        self._win._mute_sig.emit(bool(v))
 
     @property
     def current_file(self) -> str | None:
