@@ -24,3 +24,4 @@ python-pptx
 pyqt6
 openwakeword
 onnxruntime
+speexdsp-ns
