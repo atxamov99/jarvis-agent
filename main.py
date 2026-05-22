@@ -91,7 +91,15 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "web_search",
-        "description": "Searches the web for any information.",
+        "description": (
+            "Search the web (powered by Google) for ANY factual question the user asks. "
+            "CALL THIS for: news, prices, current events, weather facts, dates, biographies, "
+            "definitions, sports results, currency rates, recipes, addresses, opening hours, "
+            "technical/programming questions, product comparisons, or ANY 'who/what/when/where/why/how' question. "
+            "NEVER say 'I don't know' or 'I can't access the internet' — call this tool instead. "
+            "When the user asks something factual that you don't have memorized, call web_search immediately. "
+            "After getting results, summarize them BRIEFLY in Uzbek (2-4 sentences)."
+        ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
