@@ -2,6 +2,10 @@ import time
 import subprocess
 import platform
 import shutil
+import os
+import re
+import shlex
+from pathlib import Path
 
 try:
     import psutil
@@ -10,6 +14,85 @@ except ImportError:
     _PSUTIL = False
 
 _SYSTEM = platform.system()
+
+
+_DESKTOP_DIRS = [
+    Path.home() / ".local/share/applications",
+    Path("/usr/share/applications"),
+    Path("/usr/local/share/applications"),
+    Path("/var/lib/flatpak/exports/share/applications"),
+    Path.home() / ".local/share/flatpak/exports/share/applications",
+    Path("/var/lib/snapd/desktop/applications"),
+]
+
+
+def _parse_desktop_file(path: Path) -> dict:
+    info = {}
+    try:
+        in_main = False
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip()
+            if line.startswith("["):
+                in_main = (line == "[Desktop Entry]")
+                continue
+            if not in_main or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            info.setdefault(key.strip(), val.strip())
+    except Exception:
+        return {}
+    return info
+
+
+def _find_desktop_file(query: str) -> tuple[Path, dict] | None:
+    """Search desktop files for one whose Name/filename matches the query."""
+    q = query.lower().strip()
+    q_compact = re.sub(r"[^a-z0-9]", "", q)
+    candidates: list[tuple[int, Path, dict]] = []
+
+    for d in _DESKTOP_DIRS:
+        if not d.is_dir():
+            continue
+        for entry in d.glob("*.desktop"):
+            info = _parse_desktop_file(entry)
+            if not info or info.get("NoDisplay", "").lower() == "true":
+                continue
+            name = info.get("Name", "").lower()
+            fname = entry.stem.lower()
+            name_compact = re.sub(r"[^a-z0-9]", "", name)
+            fname_compact = re.sub(r"[^a-z0-9]", "", fname)
+
+            score = 0
+            if name == q or fname == q:
+                score = 100
+            elif name_compact == q_compact or fname_compact == q_compact:
+                score = 90
+            elif q_compact and (q_compact in name_compact or q_compact in fname_compact):
+                score = 70
+            elif q in name or q in fname:
+                score = 60
+
+            if score:
+                candidates.append((score, entry, info))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: -t[0])
+    _, path, info = candidates[0]
+    return path, info
+
+
+def _exec_from_desktop(exec_line: str) -> list[str]:
+    """Strip desktop-entry field codes (%U, %f, %u, %F, etc.) and split into argv."""
+    cleaned = re.sub(r"\s+%[a-zA-Z]", "", exec_line).strip()
+    try:
+        argv = shlex.split(cleaned)
+    except ValueError:
+        argv = cleaned.split()
+    # Drop trailing '--' (end-of-options marker left over after stripping %U/%F)
+    while argv and argv[-1] == "--":
+        argv.pop()
+    return argv
 
 _APP_ALIASES: dict[str, dict[str, str]] = {
 
@@ -170,6 +253,7 @@ def _launch_macos(app_name: str) -> bool:
 
 def _launch_linux(app_name: str) -> bool:
 
+    # 1. Try PATH binary
     binary = (
         shutil.which(app_name) or
         shutil.which(app_name.lower()) or
@@ -181,36 +265,89 @@ def _launch_linux(app_name: str) -> bool:
             subprocess.Popen(
                 [binary],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
             )
             time.sleep(1.0)
             return True
         except Exception:
             pass
 
+    # 2. Search .desktop files (handles Telegram, Flatpak, custom installs)
+    found = _find_desktop_file(app_name)
+    if found:
+        desktop_path, info = found
+        # 2a. Prefer `gio launch` — respects DBusActivatable & desktop semantics
+        if shutil.which("gio"):
+            try:
+                result = subprocess.run(
+                    ["gio", "launch", str(desktop_path)],
+                    capture_output=True, timeout=8
+                )
+                if result.returncode == 0:
+                    time.sleep(0.8)
+                    return True
+            except Exception:
+                pass
+
+        # 2b. gtk-launch by basename
+        if shutil.which("gtk-launch"):
+            try:
+                result = subprocess.run(
+                    ["gtk-launch", desktop_path.stem],
+                    capture_output=True, timeout=8
+                )
+                if result.returncode == 0:
+                    time.sleep(0.8)
+                    return True
+            except Exception:
+                pass
+
+        # 2c. Direct Exec= line from the .desktop file
+        exec_line = info.get("Exec", "")
+        if exec_line:
+            argv = _exec_from_desktop(exec_line)
+            if argv:
+                try:
+                    subprocess.Popen(
+                        argv,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                        cwd=os.path.expanduser("~"),
+                    )
+                    time.sleep(1.0)
+                    return True
+                except Exception as e:
+                    print(f"[open_app] desktop Exec failed: {e}")
+
+    # 3. xdg-open fallback (URLs, mime types)
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["xdg-open", app_name],
             capture_output=True, timeout=5
         )
-        return True
+        if result.returncode == 0:
+            return True
     except Exception:
         pass
 
-    for desktop_name in [
-        app_name.lower(),
-        app_name.lower().replace(" ", "-"),
-        app_name.lower().replace(" ", ""),
-    ]:
-        try:
-            result = subprocess.run(
-                ["gtk-launch", desktop_name],
-                capture_output=True, timeout=5
-            )
-            if result.returncode == 0:
-                return True
-        except Exception:
-            pass
+    # 4. gtk-launch with common name variations
+    if shutil.which("gtk-launch"):
+        for desktop_name in [
+            app_name.lower(),
+            app_name.lower().replace(" ", "-"),
+            app_name.lower().replace(" ", ""),
+        ]:
+            try:
+                result = subprocess.run(
+                    ["gtk-launch", desktop_name],
+                    capture_output=True, timeout=5
+                )
+                if result.returncode == 0:
+                    return True
+            except Exception:
+                pass
 
     return False
 

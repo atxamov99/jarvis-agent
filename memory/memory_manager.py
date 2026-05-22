@@ -14,8 +14,8 @@ def get_base_dir() -> Path:
 BASE_DIR         = get_base_dir()
 MEMORY_PATH      = BASE_DIR / "memory" / "long_term.json"
 _lock            = Lock()
-MAX_VALUE_LENGTH = 380
-MEMORY_MAX_CHARS = 2200
+MAX_VALUE_LENGTH = 50_000
+MEMORY_MAX_CHARS = 1_073_741_824  # 1 GB
 
 def _empty_memory() -> dict:
     return {
@@ -188,8 +188,8 @@ def format_memory_for_prompt(memory: dict | None) -> str:
 
     header = "[WHAT YOU KNOW ABOUT THIS PERSON — use naturally, never recite like a list]\n"
     result = header + "\n".join(lines)
-    if len(result) > 2000:
-        result = result[:1997] + "…"
+    if len(result) > 100_000:
+        result = result[:99_997] + "…"
 
     return result + "\n"
 

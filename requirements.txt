@@ -1,4 +1,4 @@
-﻿sounddevice
+sounddevice
 google-genai
 google-generativeai
 pillow
@@ -14,11 +14,11 @@ numpy
 mss
 Pillow
 psutil
-comtypes
-pycaw               
-win10toast          
+# comtypes (Windows only)
+# pycaw (Windows only)
+# win10toast (Windows only)
 send2trash
 youtube-transcript-api
-pywinauto
+# pywinauto (Windows only)
 python-pptx
 pyqt6

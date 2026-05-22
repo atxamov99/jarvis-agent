@@ -451,11 +451,18 @@ TOOL_DECLARATIONS = [
     {
         "name": "save_memory",
         "description": (
-            "Save an important personal fact about the user to long-term memory. "
-            "Call this silently whenever the user reveals something worth remembering: "
-            "name, age, city, job, preferences, hobbies, relationships, projects, or future plans. "
+            "Save information to long-term memory. "
+            "MANDATORY TRIGGER — ALWAYS call this tool when the user explicitly asks you to remember/save something. "
+            "Explicit Uzbek triggers (MUST call save_memory immediately): "
+            "'esda saqla', 'esingda tut', 'esingga saqla', 'hotirangga saqla', 'hotirangda saqla', "
+            "'xotirangga saqla', 'eslab qol', 'eslab qol uni', 'shuni saqla', 'shuni eslab qol', "
+            "'manga shuni saqlab qoy', 'buni esingga olib qol'. "
+            "Explicit Russian/English triggers: 'запомни', 'сохрани', 'remember this', 'save this'. "
+            "ALSO call silently (without explicit request) when user reveals: name, age, city, job, "
+            "preferences, hobbies, relationships, projects, or future plans. "
+            "When the user gives an EXPLICIT save command, confirm BRIEFLY in Uzbek (e.g. 'Eslab qoldim.') after calling the tool. "
+            "When called silently (no explicit request), do NOT announce. "
             "Do NOT call for: weather, reminders, searches, or one-time commands. "
-            "Do NOT announce that you are saving — just call it silently. "
             "Values must be in English regardless of the conversation language."
         ),
         "parameters": {
