@@ -909,10 +909,25 @@ class JarvisLive:
 
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
-                self.speak("Goodbye, sir.")
+                self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
                 def _shutdown():
-                    import time, os
-                    time.sleep(1)
+                    # Wait for speech to start, then wait for it to finish
+                    deadline = time.time() + 12
+                    while time.time() < deadline:
+                        with self._speaking_lock:
+                            speaking = self._is_speaking
+                        if speaking:
+                            break
+                        time.sleep(0.05)
+                    # Now wait for it to finish
+                    deadline = time.time() + 15
+                    while time.time() < deadline:
+                        with self._speaking_lock:
+                            speaking = self._is_speaking
+                        if not speaking:
+                            break
+                        time.sleep(0.05)
+                    time.sleep(1.5)
                     os._exit(0)
                 threading.Thread(target=_shutdown, daemon=True).start()
 
