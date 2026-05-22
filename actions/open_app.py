@@ -148,6 +148,73 @@ _APP_ALIASES: dict[str, dict[str, str]] = {
 }
 
 
+def _steam_library_paths() -> list[Path]:
+    """Return all Steam library roots from libraryfolders.vdf."""
+    roots: list[Path] = []
+    default = Path("C:/Program Files (x86)/Steam")
+    candidates = [default]
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"SOFTWARE\WOW6432Node\Valve\Steam")
+        install_path = winreg.QueryValueEx(key, "InstallPath")[0]
+        candidates.insert(0, Path(install_path))
+    except Exception:
+        pass
+
+    for steam_root in candidates:
+        vdf = steam_root / "steamapps" / "libraryfolders.vdf"
+        if vdf.exists():
+            roots.append(steam_root)
+            try:
+                text = vdf.read_text(encoding="utf-8", errors="ignore")
+                for m in re.finditer(r'"path"\s+"([^"]+)"', text):
+                    p = Path(m.group(1))
+                    if p.is_dir():
+                        roots.append(p)
+            except Exception:
+                pass
+    return roots
+
+
+def _find_game_exe(query: str) -> Path | None:
+    """Search Steam/Epic library folders for an exe matching query."""
+    q = re.sub(r"[^a-z0-9]", "", query.lower())
+
+    search_roots: list[Path] = []
+    for lib in _steam_library_paths():
+        search_roots.append(lib / "steamapps" / "common")
+
+    # Epic Games
+    for epic_root in [
+        Path("C:/Program Files/Epic Games"),
+        Path("C:/Program Files (x86)/Epic Games"),
+    ]:
+        if epic_root.is_dir():
+            search_roots.append(epic_root)
+
+    best: tuple[int, Path] | None = None
+    for root in search_roots:
+        if not root.is_dir():
+            continue
+        for game_dir in root.iterdir():
+            if not game_dir.is_dir():
+                continue
+            dir_norm = re.sub(r"[^a-z0-9]", "", game_dir.name.lower())
+            if q not in dir_norm and dir_norm not in q:
+                continue
+            # Look for the main exe (not uninstaller/crash reporter)
+            for exe in sorted(game_dir.glob("*.exe")):
+                n = exe.name.lower()
+                if any(x in n for x in ("unins", "crash", "setup", "redist",
+                                        "update", "helper", "launcher_helper")):
+                    continue
+                score = 100 if re.sub(r"[^a-z0-9]", "", n[:-4]) == dir_norm else 50
+                if best is None or score > best[0]:
+                    best = (score, exe)
+    return best[1] if best else None
+
+
 def _normalize(raw: str) -> str:
     key = raw.lower().strip()
 
@@ -158,7 +225,8 @@ def _normalize(raw: str) -> str:
         if alias_key in key or key in alias_key:
             return os_map.get(_SYSTEM, raw)
 
-    return raw  
+    return raw
+
 
 def _launch_windows(app_name: str) -> bool:
 
@@ -175,6 +243,23 @@ def _launch_windows(app_name: str) -> bool:
         except Exception as e:
             print(f"[open_app] subprocess failed: {e}")
 
+    # Steam / Epic: find exe in library folders
+    exe = _find_game_exe(app_name)
+    if exe:
+        print(f"[open_app] Found game exe: {exe}")
+        try:
+            subprocess.Popen(
+                str(exe),
+                cwd=str(exe.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            time.sleep(2.0)
+            return True
+        except Exception as e:
+            print(f"[open_app] game exe launch failed: {e}")
+
     if ":" in app_name:
         try:
             subprocess.Popen(f"start {app_name}", shell=True)
@@ -187,9 +272,9 @@ def _launch_windows(app_name: str) -> bool:
         import pyautogui
         pyautogui.PAUSE = 0.1
         pyautogui.press("win")
-        time.sleep(0.7)
+        time.sleep(0.8)
         pyautogui.write(app_name, interval=0.05)
-        time.sleep(0.9)
+        time.sleep(1.2)
         pyautogui.press("enter")
         time.sleep(2.5)
         return True
