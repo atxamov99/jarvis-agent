@@ -177,24 +177,53 @@ def _steam_library_paths() -> list[Path]:
     return roots
 
 
-def _find_game_exe(query: str) -> Path | None:
-    """Search Steam/Epic library folders for an exe matching query."""
+def _steam_appid_for_dir(steam_root: Path, game_dir_name: str) -> str | None:
+    """Look up Steam App ID from appmanifest_*.acf files."""
+    acf_dir = steam_root / "steamapps"
+    if not acf_dir.is_dir():
+        return None
+    q = game_dir_name.lower()
+    for acf in acf_dir.glob("appmanifest_*.acf"):
+        try:
+            text = acf.read_text(encoding="utf-8", errors="ignore")
+            install_m = re.search(r'"installdir"\s+"([^"]+)"', text)
+            if install_m and install_m.group(1).lower() == q:
+                appid_m = re.search(r'"appid"\s+"(\d+)"', text)
+                if appid_m:
+                    return appid_m.group(1)
+        except Exception:
+            pass
+    return None
+
+
+def _find_steam_exe() -> Path | None:
+    for lib in _steam_library_paths():
+        exe = lib / "steam.exe"
+        if exe.exists():
+            return exe
+    default = Path("C:/Program Files (x86)/Steam/steam.exe")
+    return default if default.exists() else None
+
+
+def _find_game_exe(query: str) -> tuple[Path, str | None] | None:
+    """Search Steam/Epic library folders for a game.
+    Returns (exe_path, steam_appid_or_None)."""
     q = re.sub(r"[^a-z0-9]", "", query.lower())
 
-    search_roots: list[Path] = []
-    for lib in _steam_library_paths():
-        search_roots.append(lib / "steamapps" / "common")
+    steam_libs = _steam_library_paths()
+    search_roots: list[tuple[Path, Path | None]] = []  # (games_root, steam_root)
+    for lib in steam_libs:
+        search_roots.append((lib / "steamapps" / "common", lib))
 
-    # Epic Games
     for epic_root in [
         Path("C:/Program Files/Epic Games"),
         Path("C:/Program Files (x86)/Epic Games"),
     ]:
         if epic_root.is_dir():
-            search_roots.append(epic_root)
+            search_roots.append((epic_root, None))
 
-    best: tuple[int, Path] | None = None
-    for root in search_roots:
+    best: tuple[int, Path, str | None] | None = None
+    for root, steam_root in search_roots:
         if not root.is_dir():
             continue
         for game_dir in root.iterdir():
@@ -203,7 +232,7 @@ def _find_game_exe(query: str) -> Path | None:
             dir_norm = re.sub(r"[^a-z0-9]", "", game_dir.name.lower())
             if q not in dir_norm and dir_norm not in q:
                 continue
-            # Look for the main exe (not uninstaller/crash reporter)
+            appid = _steam_appid_for_dir(steam_root, game_dir.name) if steam_root else None
             for exe in sorted(game_dir.glob("*.exe")):
                 n = exe.name.lower()
                 if any(x in n for x in ("unins", "crash", "setup", "redist",
@@ -211,8 +240,8 @@ def _find_game_exe(query: str) -> Path | None:
                     continue
                 score = 100 if re.sub(r"[^a-z0-9]", "", n[:-4]) == dir_norm else 50
                 if best is None or score > best[0]:
-                    best = (score, exe)
-    return best[1] if best else None
+                    best = (score, exe, appid)
+    return (best[1], best[2]) if best else None
 
 
 def _search_registry(query: str) -> str | None:
@@ -271,6 +300,9 @@ def _resolve_lnk(lnk_path: Path) -> str | None:
     return None
 
 
+_SKIP_EXE = {"update.exe", "uninstall.exe", "unins000.exe", "setup.exe",
+             "crashpad_handler.exe", "crashreporter.exe", "helper.exe"}
+
 def _search_start_menu(query: str) -> str | None:
     """Search Start Menu .lnk shortcuts and resolve them to exe paths."""
     q = re.sub(r"[^a-z0-9]", "", query.lower())
@@ -289,10 +321,12 @@ def _search_start_menu(query: str) -> str | None:
             target = _resolve_lnk(lnk)
             if not target:
                 continue
+            if Path(target).name.lower() in _SKIP_EXE:
+                continue
             score = 100 if stem == q else (80 if q in stem else 60)
             if best is None or score > best[0]:
                 best = (score, target)
-                print(f"[open_app] Start Menu hit: {lnk.name} → {target}")
+                print(f"[open_app] Start Menu hit: {lnk.name} -> {target}")
     return best[1] if best else None
 
 
@@ -339,9 +373,26 @@ def _launch_windows(app_name: str) -> bool:
         return True
 
     # 4. Steam / Epic library scan
-    game_exe = _find_game_exe(app_name)
-    if game_exe and _launch_exe(str(game_exe), str(game_exe.parent)):
-        return True
+    game_result = _find_game_exe(app_name)
+    if game_result:
+        game_exe, appid = game_result
+        # Prefer Steam -applaunch (handles DRM, runs as if launched from Steam)
+        if appid:
+            steam_exe = _find_steam_exe()
+            if steam_exe:
+                print(f"[open_app] Steam launch: appid={appid}")
+                try:
+                    subprocess.Popen(
+                        [str(steam_exe), "-applaunch", appid],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    time.sleep(2.0)
+                    return True
+                except Exception as e:
+                    print(f"[open_app] steam -applaunch failed: {e}")
+        # Fallback: direct exe
+        if _launch_exe(str(game_exe), str(game_exe.parent)):
+            return True
 
     # 5. ms-settings: and other URI schemes
     if ":" in app_name:
