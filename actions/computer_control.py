@@ -143,27 +143,56 @@ def _user_profile() -> dict:
         pass
     return {}
 
+import os as _os
+import shutil as _shutil
+
+_IS_WAYLAND = bool(_os.environ.get("WAYLAND_DISPLAY")) and _os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+_WTYPE_OK   = _shutil.which("wtype") is not None
+_XDOTOOL_OK = _shutil.which("xdotool") is not None
+
+
+def _native_type(text: str, interval: float = 0.03) -> bool:
+    """Type via OS-native tools. Returns True on success.
+
+    On Wayland, pyautogui is unreliable (XTest not available to native Wayland
+    windows). Use `wtype` (Wayland) or `xdotool` (X11/XWayland) instead.
+    """
+    if _IS_WAYLAND and _WTYPE_OK:
+        try:
+            subprocess.run(
+                ["wtype", "-d", str(int(interval * 1000)), text],
+                check=True, timeout=30,
+            )
+            return True
+        except Exception as e:
+            print(f"[ComputerControl] wtype failed: {e}")
+    if _XDOTOOL_OK:
+        try:
+            subprocess.run(
+                ["xdotool", "type", "--delay", str(int(interval * 1000)), "--", text],
+                check=True, timeout=30,
+            )
+            return True
+        except Exception as e:
+            print(f"[ComputerControl] xdotool failed: {e}")
+    return False
+
+
 def _type(text: str, interval: float = 0.03) -> str:
+    time.sleep(0.4)  # let target window settle / be focused
+    if _native_type(text, interval):
+        return f"Typed: {text[:60]}{'…' if len(text) > 60 else ''}"
+    # Last resort — pyautogui (works on X11, may silently fail on Wayland)
     _require_pyautogui()
-    time.sleep(0.3)
     pyautogui.typewrite(text, interval=interval)
-    return f"Typed: {text[:60]}{'…' if len(text) > 60 else ''}"
+    return f"Typed (pyautogui): {text[:60]}{'…' if len(text) > 60 else ''}"
 
 
 def _smart_type(text: str, clear_first: bool = True) -> str:
-    _require_pyautogui()
     if clear_first:
         _clear_field()
         time.sleep(0.1)
-
-    if len(text) > 20 and _PYPERCLIP:
-        pyperclip.copy(text)
-        time.sleep(0.1)
-        pyautogui.hotkey("ctrl", "v")
-        return f"Smart-typed (clipboard): {text[:60]}{'…' if len(text) > 60 else ''}"
-
-    pyautogui.typewrite(text, interval=0.04)
-    return f"Smart-typed: {text[:60]}{'…' if len(text) > 60 else ''}"
+    return _type(text)
 
 
 def _click(x=None, y=None, button: str = "left", clicks: int = 1) -> str:

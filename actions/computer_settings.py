@@ -345,12 +345,32 @@ def press_key(key: str): pyautogui.press(key)
 def type_text(text: str, press_enter_after: bool = False):
     if not text:
         return
-    if _PYPERCLIP:
-        pyperclip.copy(str(text))
-        time.sleep(0.15)
-        paste()
-    else:
-        pyautogui.write(str(text), interval=0.03)
+    text = str(text)
+    time.sleep(0.3)  # let target window receive focus
+
+    # Wayland-native typing (works inside Telegram, etc.)
+    import os as _os, shutil as _shutil, subprocess as _sp
+    is_wayland = bool(_os.environ.get("WAYLAND_DISPLAY")) and _os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+    typed = False
+    try:
+        if is_wayland and _shutil.which("wtype"):
+            _sp.run(["wtype", "-d", "30", text], check=True, timeout=30)
+            typed = True
+        elif _shutil.which("xdotool"):
+            _sp.run(["xdotool", "type", "--delay", "30", "--", text], check=True, timeout=30)
+            typed = True
+    except Exception as e:
+        print(f"[ComputerSettings] native type failed: {e}")
+
+    if not typed:
+        # Fallback: clipboard + paste, or raw pyautogui
+        if _PYPERCLIP:
+            pyperclip.copy(text)
+            time.sleep(0.15)
+            paste()
+        else:
+            pyautogui.write(text, interval=0.03)
+
     if press_enter_after:
         time.sleep(0.1)
         pyautogui.press("enter")
