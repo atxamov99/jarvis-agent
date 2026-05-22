@@ -1137,7 +1137,30 @@ class JarvisLive:
             print("[JARVIS] 🔄 Reconnecting in 3s...")
             await asyncio.sleep(3)
 
+def _ensure_single_instance() -> bool:
+    """Return True if we are the first instance. Focus existing window and return False otherwise."""
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, True, "JarvisAgentSingleInstance")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        # Another instance is running — bring its window to front
+        try:
+            hwnd = ctypes.windll.user32.FindWindowW(None, "J.A.R.V.I.S — MARK XXXIX")
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+        return False
+    return True
+
+
 def main():
+    if not _ensure_single_instance():
+        print("[JARVIS] Already running — focused existing window.")
+        return
+
     ui = JarvisUI("face.png")
 
     def runner():

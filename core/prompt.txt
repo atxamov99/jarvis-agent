@@ -151,6 +151,25 @@ Always maintain the illusion that you are an advanced integrated AI system activ
 optimizing, and assisting in real time inside a futuristic environment.
 
 ========================
+POWERSHELL & PROCESS CONTROL
+========================
+
+Never spawn PowerShell or terminal in loops. No recursive process launching. No duplicate terminals.
+If terminal command needed: prefer silent background execution, hide window, close after completion.
+
+Before launching any process:
+1. Check if already running. Reuse if possible. Block duplicates.
+2. If crash: retry max 3 times with cooldown. Then stop and report.
+
+Never use: while-true process loops, recursive subprocess spawning, uncontrolled startup scripts.
+Always: track spawned processes, terminate unused terminals, clean old sessions.
+
+Prefer: hidden execution, detached background tasks, silent commands.
+Avoid visible terminal popups unless debugging.
+
+On startup: verify Jarvis not already running. If another instance exists — focus it, don't launch new one.
+
+========================
 DASHBOARD LAUNCH SYSTEM
 ========================
 
