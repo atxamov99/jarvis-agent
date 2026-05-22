@@ -1122,6 +1122,7 @@ class JarvisLive:
                     print("[JARVIS] ✅ Connected.")
                     self.ui.set_state("LISTENING")
                     self.ui.write_log("SYS: JARVIS online.")
+                    self.speak("JARVIS systems online. Ready.")
 
                     tg.create_task(self._send_realtime())
                     tg.create_task(self._listen_audio())
