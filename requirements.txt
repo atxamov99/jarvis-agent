@@ -22,3 +22,5 @@ youtube-transcript-api
 # pywinauto (Windows only)
 python-pptx
 pyqt6
+openwakeword
+onnxruntime

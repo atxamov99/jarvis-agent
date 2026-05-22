@@ -12,6 +12,7 @@ from google.genai import types
 from ui import JarvisUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
+    forget, forget_category, forget_all,
 )
 
 from actions.file_processor import file_processor
@@ -31,6 +32,14 @@ from actions.dev_agent         import dev_agent
 from actions.web_search        import web_search as web_search_action
 from actions.computer_control  import computer_control
 from actions.game_updater      import game_updater
+from actions.translate         import translate as translate_action
+
+try:
+    from actions.wake_word import WakeWordDetector
+    _WAKE_WORD_AVAILABLE = True
+except ImportError as _wake_err:
+    print(f"[JARVIS] ⚠️ Wake-word unavailable: {_wake_err}")
+    _WAKE_WORD_AVAILABLE = False
 
 
 def get_base_dir():
@@ -493,6 +502,52 @@ TOOL_DECLARATIONS = [
             "required": ["category", "key", "value"]
         }
     },
+    {
+        "name": "translate_text",
+        "description": (
+            "Translate text from any language to any language. "
+            "TRIGGER on Uzbek phrases: 'tarjima qil', 'tarjima qilib ber', 'tarjima qilib bering', "
+            "'inglizchaga oʻgir', 'rus tiliga oʻgir', 'oʻzbekchaga oʻgir', 'oʻgir', 'translate'. "
+            "When the user says 'shuni inglizchaga tarjima qil: <matn>' — call with text=<matn>, target_language='english'. "
+            "When the user says 'mana shuni tarjima qil' without specifying language, default target_language='uzbek'. "
+            "When the user says 'menga rus tilida ayt: <matn>' — call with text=<matn>, target_language='russian'. "
+            "After the tool returns the translated text, speak it back in full (do NOT shorten it)."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "text":            {"type": "STRING", "description": "The exact text to translate (verbatim from user)"},
+                "target_language": {"type": "STRING", "description": "Target language in English (e.g. 'uzbek', 'english', 'russian', 'turkish', 'arabic', 'french')"},
+                "source_language": {"type": "STRING", "description": "Optional source language hint in English. Leave empty for auto-detect."},
+            },
+            "required": ["text", "target_language"]
+        }
+    },
+    {
+        "name": "delete_memory",
+        "description": (
+            "Delete information from long-term memory. "
+            "MANDATORY TRIGGER — ALWAYS call this when the user explicitly asks you to forget/delete/erase memory. "
+            "Uzbek triggers: 'esdan chiqar', 'unut', 'unutib yubor', 'xotirangdan oʻchir', 'hotirangdan oʻchir', "
+            "'xotirangni oʻchir', 'hotirangni oʻchir', 'malumotlarni oʻchir', 'hammasini oʻchir', "
+            "'esda saqlaganlaringni oʻchir', 'tozala'. "
+            "Russian/English triggers: 'забудь', 'удали из памяти', 'forget', 'delete memory', 'wipe memory'. "
+            "Scope parameter controls what to delete: "
+            "'all' = wipe entire long-term memory (use when user says hammasini/all/everything). "
+            "'category' = clear one category (requires category param). "
+            "'entry' = delete one specific item (requires category and key). "
+            "After deleting, briefly confirm in Uzbek (e.g. 'Oʻchirildi.' or 'Hammasi tozalandi.')."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "scope":    {"type": "STRING", "description": "all | category | entry"},
+                "category": {"type": "STRING", "description": "identity | preferences | projects | relationships | wishes | notes (required for scope=category|entry)"},
+                "key":      {"type": "STRING", "description": "Specific key to delete (required for scope=entry)"},
+            },
+            "required": ["scope"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -507,6 +562,24 @@ class JarvisLive:
         self._speaking_lock = threading.Lock()
         self.ui.on_text_command = self._on_text_command
         self._turn_done_event: asyncio.Event | None = None
+
+        # Wake-word detector ("hey jarvis"). Starts muted; unmutes on wake.
+        self._wake_detector = None
+        if _WAKE_WORD_AVAILABLE:
+            try:
+                self._wake_detector = WakeWordDetector(on_wake=self._on_wake_word)
+                self.ui.muted = True
+                print("[JARVIS] 💤 Started in sleep mode — say 'hey jarvis' to wake")
+            except Exception as e:
+                print(f"[JARVIS] ⚠️ Wake-word init failed: {e}")
+                self._wake_detector = None
+
+    def _on_wake_word(self):
+        """Called by WakeWordDetector when 'hey jarvis' is heard."""
+        if self.ui.muted:
+            self.ui.muted = False
+            self.ui.write_log("🟢 Wake-word detected — listening")
+            print("[JARVIS] 🟢 Wake-word triggered — unmuted")
 
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
@@ -526,6 +599,20 @@ class JarvisLive:
             self.ui.set_state("SPEAKING")
         elif not self.ui.muted:
             self.ui.set_state("LISTENING")
+            # Schedule auto-mute after Jarvis finishes speaking (wake-word mode)
+            if self._wake_detector and not self._is_speaking:
+                if hasattr(self, "_sleep_timer") and self._sleep_timer:
+                    self._sleep_timer.cancel()
+                self._sleep_timer = threading.Timer(8.0, self._auto_sleep)
+                self._sleep_timer.daemon = True
+                self._sleep_timer.start()
+
+    def _auto_sleep(self):
+        """Re-mute after grace period so user must say 'hey jarvis' again."""
+        if not self.ui.muted and not self._is_speaking:
+            self.ui.muted = True
+            print("[JARVIS] 💤 Auto-sleep — say 'hey jarvis' to wake")
+            self.ui.write_log("💤 Sleeping — say 'hey jarvis'")
 
     def speak(self, text: str):
         if not self._loop or not self.session:
@@ -600,6 +687,30 @@ class JarvisLive:
                 response={"result": "ok", "silent": True}
             )
 
+        if name == "delete_memory":
+            scope    = (args.get("scope") or "").lower().strip()
+            category = args.get("category", "")
+            key      = args.get("key", "")
+            try:
+                if scope == "all":
+                    result_msg = forget_all()
+                elif scope == "category" and category:
+                    result_msg = forget_category(category)
+                elif scope == "entry" and category and key:
+                    result_msg = forget(key, category)
+                else:
+                    result_msg = f"Invalid delete params: scope={scope!r} category={category!r} key={key!r}"
+                print(f"[Memory] 🗑️  delete_memory: {result_msg}")
+            except Exception as e:
+                result_msg = f"Delete failed: {e}"
+                print(f"[Memory] ❌ {result_msg}")
+            if not self.ui.muted:
+                self.ui.set_state("LISTENING")
+            return types.FunctionResponse(
+                id=fc.id, name=name,
+                response={"result": result_msg}
+            )
+
         loop   = asyncio.get_event_loop()
         result = "Done."
 
@@ -667,6 +778,10 @@ class JarvisLive:
             elif name == "web_search":
                 r = await loop.run_in_executor(None, lambda: web_search_action(parameters=args, player=self.ui))
                 result = r or "Done."
+
+            elif name == "translate_text":
+                r = await loop.run_in_executor(None, lambda: translate_action(parameters=args, player=self.ui))
+                result = r or "Done."
             elif name == "file_processor":
                 if not args.get("file_path") and self.ui.current_file:
                     args["file_path"] = self.ui.current_file
@@ -726,6 +841,14 @@ class JarvisLive:
         def callback(indata, frames, time_info, status):
             with self._speaking_lock:
                 jarvis_speaking = self._is_speaking
+
+            # Feed wake-word detector while muted (skip while Jarvis is speaking)
+            if self._wake_detector and self.ui.muted and not jarvis_speaking:
+                try:
+                    self._wake_detector.feed(indata)
+                except Exception as e:
+                    print(f"[WakeWord] feed error: {e}")
+
             if not jarvis_speaking and not self.ui.muted:
                 data = indata.tobytes()
                 loop.call_soon_threadsafe(

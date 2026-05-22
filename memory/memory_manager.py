@@ -212,4 +212,21 @@ def forget(key: str, category: str = "notes") -> str:
     return f"Not found: {category}/{key}"
 
 
+def forget_category(category: str) -> str:
+    valid = {"identity", "preferences", "projects", "relationships", "wishes", "notes"}
+    if category not in valid:
+        return f"Invalid category: {category}"
+    memory = load_memory()
+    count  = len(memory.get(category, {}))
+    memory[category] = {}
+    save_memory(memory)
+    return f"Cleared category '{category}' ({count} entries removed)"
+
+
+def forget_all() -> str:
+    memory = _empty_memory()
+    save_memory(memory)
+    return "All long-term memory wiped."
+
+
 forget_memory = forget
