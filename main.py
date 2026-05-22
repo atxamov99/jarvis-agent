@@ -93,10 +93,38 @@ def _load_system_prompt() -> str:
 
 _CTRL_RE = re.compile(r"<ctrl\d+>", re.IGNORECASE)
 
-def _clean_transcript(text: str) -> str:    
+def _clean_transcript(text: str) -> str:
     text = _CTRL_RE.sub("", text)
     text = re.sub(r"[\x00-\x08\x0b-\x1f]", "", text)
     return text.strip()
+
+
+def _ollama_query(args: dict) -> str:
+    """Run a prompt against local Ollama. Returns the response text."""
+    try:
+        import ollama as _ollama
+
+        prompt  = args.get("prompt", "")
+        model   = args.get("model", "").strip()
+        context = args.get("context", "").strip()
+
+        if not model:
+            try:
+                models = _ollama.list().get("models", [])
+                model = models[0]["name"] if models else "llama3"
+            except Exception:
+                model = "llama3"
+
+        full_prompt = f"{context}\n\n{prompt}".strip() if context else prompt
+
+        print(f"[Ollama] model={model}  prompt={full_prompt[:80]}")
+        resp = _ollama.generate(model=model, prompt=full_prompt, stream=False)
+        answer = resp.get("response", "").strip()
+        print(f"[Ollama] → {answer[:120]}")
+        return answer or "Ollama returned an empty response."
+
+    except Exception as e:
+        return f"Ollama unavailable: {e}. Make sure 'ollama serve' is running."
 
 TOOL_DECLARATIONS = [
     {
@@ -568,6 +596,24 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "ollama_query",
+        "description": (
+            "Run a query on the local Ollama AI model running on this machine. "
+            "Use when: user says 'think locally', 'use local AI', 'ask ollama', 'offline mode', "
+            "or when internet is unavailable. Fast, private, no cloud. "
+            "Returns the model's response as text — speak it back."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "prompt":   {"type": "STRING", "description": "The question or task for Ollama"},
+                "model":    {"type": "STRING", "description": "Model name e.g. llama3, mistral, phi3. Leave empty to auto-select."},
+                "context":  {"type": "STRING", "description": "Optional extra context to prepend"},
+            },
+            "required": ["prompt"]
+        }
+    },
+    {
         "name": "toggle_mute",
         "description": (
             "Mute or unmute the microphone. "
@@ -848,6 +894,9 @@ class JarvisLive:
             elif name == "flight_finder":
                 r = await loop.run_in_executor(None, lambda: flight_finder(parameters=args, player=self.ui))
                 result = r or "Done."
+
+            elif name == "ollama_query":
+                result = await loop.run_in_executor(None, lambda: _ollama_query(args))
 
             elif name == "toggle_mute":
                 action = args.get("action", "mute").lower()

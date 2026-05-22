@@ -215,71 +215,157 @@ def _find_game_exe(query: str) -> Path | None:
     return best[1] if best else None
 
 
+def _search_registry(query: str) -> str | None:
+    """Search HKLM App Paths registry for an installed exe."""
+    if _SYSTEM != "Windows":
+        return None
+    q = re.sub(r"[^a-z0-9]", "", query.lower())
+    try:
+        import winreg
+        for hive in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
+            for subkey_path in [
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths",
+                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths",
+            ]:
+                try:
+                    key = winreg.OpenKey(hive, subkey_path)
+                except OSError:
+                    continue
+                i = 0
+                while True:
+                    try:
+                        name = winreg.EnumKey(key, i); i += 1
+                    except OSError:
+                        break
+                    name_norm = re.sub(r"[^a-z0-9]", "", name.lower().replace(".exe", ""))
+                    if q not in name_norm and name_norm not in q:
+                        continue
+                    try:
+                        subkey = winreg.OpenKey(key, name)
+                        path = winreg.QueryValue(subkey, "")
+                        path = path.strip('"').strip()
+                        if path and Path(path).exists():
+                            print(f"[open_app] Registry hit: {path}")
+                            return path
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_lnk(lnk_path: Path) -> str | None:
+    """Resolve a .lnk shortcut to its target exe path."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"(New-Object -COM WScript.Shell).CreateShortcut('{lnk_path}').TargetPath"],
+            capture_output=True, text=True, timeout=4,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        target = result.stdout.strip()
+        if target and Path(target).exists():
+            return target
+    except Exception:
+        pass
+    return None
+
+
+def _search_start_menu(query: str) -> str | None:
+    """Search Start Menu .lnk shortcuts and resolve them to exe paths."""
+    q = re.sub(r"[^a-z0-9]", "", query.lower())
+    dirs = [
+        Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs",
+        Path("C:/ProgramData/Microsoft/Windows/Start Menu/Programs"),
+    ]
+    best: tuple[int, str] | None = None
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        for lnk in d.rglob("*.lnk"):
+            stem = re.sub(r"[^a-z0-9]", "", lnk.stem.lower())
+            if q not in stem and stem not in q:
+                continue
+            target = _resolve_lnk(lnk)
+            if not target:
+                continue
+            score = 100 if stem == q else (80 if q in stem else 60)
+            if best is None or score > best[0]:
+                best = (score, target)
+                print(f"[open_app] Start Menu hit: {lnk.name} → {target}")
+    return best[1] if best else None
+
+
 def _normalize(raw: str) -> str:
     key = raw.lower().strip()
-
     if key in _APP_ALIASES:
         return _APP_ALIASES[key].get(_SYSTEM, raw)
-
     for alias_key, os_map in _APP_ALIASES.items():
         if alias_key in key or key in alias_key:
             return os_map.get(_SYSTEM, raw)
-
     return raw
+
+
+def _launch_exe(path: str, cwd: str | None = None) -> bool:
+    try:
+        subprocess.Popen(
+            path, cwd=cwd or str(Path(path).parent),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        time.sleep(1.5)
+        return True
+    except Exception as e:
+        print(f"[open_app] launch_exe failed: {e}")
+        return False
 
 
 def _launch_windows(app_name: str) -> bool:
 
-    if shutil.which(app_name) or shutil.which(app_name.split(".")[0]):
-        try:
-            subprocess.Popen(
-                app_name,
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            time.sleep(1.5)
+    # 1. Direct PATH hit
+    found = shutil.which(app_name) or shutil.which(app_name.split(".")[0])
+    if found:
+        if _launch_exe(found):
             return True
-        except Exception as e:
-            print(f"[open_app] subprocess failed: {e}")
 
-    # Steam / Epic: find exe in library folders
-    exe = _find_game_exe(app_name)
-    if exe:
-        print(f"[open_app] Found game exe: {exe}")
-        try:
-            subprocess.Popen(
-                str(exe),
-                cwd=str(exe.parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            time.sleep(2.0)
-            return True
-        except Exception as e:
-            print(f"[open_app] game exe launch failed: {e}")
+    # 2. Windows Registry — App Paths (most apps register here on install)
+    reg_path = _search_registry(app_name)
+    if reg_path and _launch_exe(reg_path):
+        return True
 
+    # 3. Start Menu .lnk shortcuts
+    lnk_target = _search_start_menu(app_name)
+    if lnk_target and _launch_exe(lnk_target):
+        return True
+
+    # 4. Steam / Epic library scan
+    game_exe = _find_game_exe(app_name)
+    if game_exe and _launch_exe(str(game_exe), str(game_exe.parent)):
+        return True
+
+    # 5. ms-settings: and other URI schemes
     if ":" in app_name:
         try:
-            subprocess.Popen(f"start {app_name}", shell=True)
+            subprocess.Popen(f'start "" "{app_name}"', shell=True,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
             time.sleep(1.0)
             return True
         except Exception:
             pass
 
+    # 6. Last resort: Start Menu GUI search via pyautogui
     try:
         import pyautogui
-        pyautogui.PAUSE = 0.1
+        pyautogui.PAUSE = 0.05
         pyautogui.press("win")
-        time.sleep(0.8)
-        pyautogui.write(app_name, interval=0.05)
-        time.sleep(1.2)
+        time.sleep(1.0)
+        pyautogui.write(app_name, interval=0.04)
+        time.sleep(1.5)
         pyautogui.press("enter")
-        time.sleep(2.5)
+        time.sleep(2.0)
         return True
     except Exception as e:
-        print(f"[open_app] Start Menu search failed: {e}")
+        print(f"[open_app] pyautogui fallback failed: {e}")
 
     return False
 
