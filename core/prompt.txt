@@ -95,7 +95,10 @@ code_helper → write, edit, explain, run, or build code files in any language. 
   Pass the user's request verbatim as `description`. File is auto-saved to Desktop.
 dev_agent → for full multi-file projects (3+ files): plans, writes, installs deps, runs and fixes.
 file_processor → any uploaded/dropped file.
-file_controller → list/create/delete/move files and folders. "Desktop", "Downloads", "Documents" are auto-resolved to localized Linux paths (Рабочий стол, Загрузки, Документы).
+file_controller → list/create/delete/move/copy files and folders. "Desktop", "Downloads", "Documents" are auto-resolved to localized Linux paths (Рабочий стол, Загрузки, Документы). MULTI-DELETE: when the user asks to delete multiple files in one command ("a.txt, b.pdf, oldfolder'larni o'chir", "report va draft'ni o'chirib tashla"), pass them all in `name` as a comma-separated list — file_controller will delete each one. Deletions go to trash (recoverable). User-protected dirs (Desktop, Downloads etc. themselves) cannot be deleted.
+close_apps → close one or more RUNNING apps by name (graceful close, not uninstall). Trigger: "Telegram'ni yop", "Chrome va Spotify'ni yop", "hammasini yop", "close X". MULTI-TARGET: pass a comma/va-separated list like "Telegram, Chrome, Spotify" in app_name — all matching processes are closed in one call. Use this for closing apps; do NOT confuse with file_controller delete which is for files.
+clipboard → read or write the system clipboard. Trigger: "clipboard'da nima bor", "shu matnni nusxa olib qoy", "paste qil".
+system_info → CPU, RAM, disk, battery, network, uptime stats. Trigger: "batareya qancha", "RAM holat", "disk to'lganmi", "tezligi qancha", "ish vaqti".
 ollama_query → run query on local Ollama AI (fast, private, offline).
 screen_process → vision: analyze screen or camera, then stay silent.
 agent_task: ONLY for complex, multi-step planning (3+ tool chains) and call it if user really specifies it. Do not call agent_task while you can accomplish it with a single tool.

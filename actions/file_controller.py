@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import platform
 from pathlib import Path
@@ -11,6 +12,26 @@ except ImportError:
     _SEND2TRASH = False
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
+
+# Split on common separators when the LLM passes multiple targets in one string:
+#   "a.txt, b.txt"       → ["a.txt", "b.txt"]
+#   "report va summary"  → ["report", "summary"]
+#   "old; tmp; logs"     → ["old", "tmp", "logs"]
+_MULTI_TARGET_RE = re.compile(
+    r"\s*(?:,|;|\bva\b|\band\b|\bи\b|&|\+)\s*",
+    re.IGNORECASE,
+)
+
+
+def _split_targets(raw: str) -> list[str]:
+    """Break a possibly-multi-target name/path string into a list.
+
+    Empty input → []. Single target with no separators → [raw.strip()].
+    """
+    if not raw:
+        return []
+    parts = _MULTI_TARGET_RE.split(raw)
+    return [p.strip() for p in parts if p and p.strip()]
 
 _SAFE_ROOTS: list[Path] = [
     Path.home(),
@@ -508,13 +529,39 @@ def file_controller(
             return create_folder(path, name=name)
 
         elif action == "delete":
-            return delete_file(path, name=name)
+            names = _split_targets(name) if name else []
+            paths = _split_targets(path) if path else []
+            # If `name` lists multiple items, delete each one under `path`.
+            # Otherwise, if `path` lists multiple absolute/shortcut paths, delete each.
+            targets: list[tuple[str, str]] = []
+            if len(names) > 1:
+                targets = [(path, n) for n in names]
+            elif len(paths) > 1:
+                targets = [(p, "") for p in paths]
+            else:
+                targets = [(path, name)]
+
+            if len(targets) == 1:
+                return delete_file(targets[0][0], name=targets[0][1])
+            results = [delete_file(p, name=n) for p, n in targets]
+            ok    = sum(1 for r in results if "moved to trash" in r.lower() or "deleted" in r.lower())
+            return f"Deleted {ok}/{len(results)} target(s):\n" + "\n".join(results)
 
         elif action == "move":
-            return move_file(path, name=name, destination=params.get("destination", ""))
+            names = _split_targets(name) if name else []
+            dest  = params.get("destination", "")
+            if len(names) > 1:
+                results = [move_file(path, name=n, destination=dest) for n in names]
+                return f"Moved {len(results)} item(s):\n" + "\n".join(results)
+            return move_file(path, name=name, destination=dest)
 
         elif action == "copy":
-            return copy_file(path, name=name, destination=params.get("destination", ""))
+            names = _split_targets(name) if name else []
+            dest  = params.get("destination", "")
+            if len(names) > 1:
+                results = [copy_file(path, name=n, destination=dest) for n in names]
+                return f"Copied {len(results)} item(s):\n" + "\n".join(results)
+            return copy_file(path, name=name, destination=dest)
 
         elif action == "rename":
             return rename_file(path, name=name, new_name=params.get("new_name", ""))

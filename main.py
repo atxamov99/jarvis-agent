@@ -46,6 +46,9 @@ from actions.web_search        import web_search as web_search_action
 from actions.computer_control  import computer_control
 from actions.game_updater      import game_updater
 from actions.translate         import translate as translate_action
+from actions.clipboard         import clipboard as clipboard_action
+from actions.system_info       import system_info as system_info_action
+from actions.close_apps        import close_apps as close_apps_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -64,11 +67,26 @@ def get_base_dir():
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
-LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+_DEFAULT_LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE          = 1024
+
+
+def _load_live_model() -> str:
+    """Override LIVE_MODEL via api_keys.json -> 'live_model' key. Lets the user
+    swap to a newer/different Gemini Live model without editing code."""
+    try:
+        with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        m = (cfg.get("live_model") or "").strip()
+        return m if m else _DEFAULT_LIVE_MODEL
+    except Exception:
+        return _DEFAULT_LIVE_MODEL
+
+
+LIVE_MODEL = _load_live_model()
 
 # Noise gate — filters background noise, knocks, brief transients
 # Each frame = CHUNK_SIZE/SEND_SAMPLE_RATE = ~64 ms
@@ -292,16 +310,23 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "file_controller",
-        "description": "Manages files and folders: list, create, delete, move, copy, rename, read, write, find, disk usage.",
+        "description": (
+            "Manages files and folders: list, create, delete (to trash), move, copy, rename, read, write, find, disk usage. "
+            "MULTI-TARGET DELETE/MOVE/COPY: For 'delete', 'move', 'copy' actions you may pass multiple file names "
+            "separated by commas, semicolons, 'va', 'and', '&' or '+' in the `name` field — the tool will operate on "
+            "EACH item under the same `path`. Example: name='report.pdf, draft.md, old.txt' deletes all three from the path. "
+            "Deletions go to system trash (recoverable), they are NOT permanent. Protected directories (home, Desktop, Downloads, "
+            "Documents, Pictures, Music, Videos themselves) cannot be deleted — only files/folders INSIDE them."
+        ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
                 "action":      {"type": "STRING", "description": "list | create_file | create_folder | delete | move | copy | rename | read | write | find | largest | disk_usage | organize_desktop | info"},
-                "path":        {"type": "STRING", "description": "File/folder path or shortcut: desktop, downloads, documents, home"},
+                "path":        {"type": "STRING", "description": "File/folder path or shortcut: desktop, downloads, documents, home, pictures, music, videos. For delete/move/copy: parent directory of the items."},
                 "destination": {"type": "STRING", "description": "Destination path for move/copy"},
                 "new_name":    {"type": "STRING", "description": "New name for rename"},
                 "content":     {"type": "STRING", "description": "Content for create_file/write"},
-                "name":        {"type": "STRING", "description": "File name to search for"},
+                "name":        {"type": "STRING", "description": "File/folder name. For multi-target delete/move/copy pass comma-separated names like 'a.txt, b.pdf, oldfolder'."},
                 "extension":   {"type": "STRING", "description": "File extension to search (e.g. .pdf)"},
                 "count":       {"type": "INTEGER", "description": "Number of results for largest"},
             },
@@ -646,6 +671,62 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "clipboard",
+        "description": (
+            "Read from or write to the system clipboard. "
+            "TRIGGER when user says: 'clipboard', 'буфер', 'nusxa olganimni o'qib ber', "
+            "'shu matnni clipboardga ko'chir', 'copy this to clipboard', 'paste qil', "
+            "'nimaga copy qilganman'. "
+            "Use action='get' to read current clipboard, action='set' with text=... to write."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING", "description": "get | set | clear"},
+                "text":   {"type": "STRING", "description": "Text to copy (only required when action=set)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "system_info",
+        "description": (
+            "Report computer system metrics: CPU, RAM, disk usage, battery, network, uptime, OS. "
+            "TRIGGER when user asks: 'akkumulyator qancha qoldi', 'batareya', 'RAM qancha bo'sh', "
+            "'disk to'lganmi', 'kompyuter holat', 'CPU yuk', 'sistema info', 'qancha qoldi diskda', "
+            "'ish vaqti', 'uptime', 'battery', 'storage'. "
+            "Pass metric='battery' for battery alone, 'cpu' for CPU, 'ram' for memory, 'disk' for storage, "
+            "'all' (default) for a full summary."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "metric": {"type": "STRING", "description": "all | cpu | ram | disk | battery | network | uptime | os"},
+                "path":   {"type": "STRING", "description": "Disk path to check (default: /)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "close_apps",
+        "description": (
+            "Close one or more running applications by name. Sends a graceful terminate signal first, "
+            "force-kills only if the app does not exit within 2 seconds. "
+            "TRIGGER when user says: 'yop', 'yopib qoy', 'o'chir' (in app context), 'close', "
+            "'shut down Telegram', 'Telegram va Chrome'ni yop', 'hammasini yop'. "
+            "MULTI-TARGET: app_name can be a single name OR a comma/va-separated list "
+            "(e.g. 'Telegram, Chrome, Spotify' or 'Telegram va Chrome') — all matching processes will be closed. "
+            "This DOES NOT uninstall the app, only closes the running instance."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "app_name": {"type": "STRING", "description": "Single app name OR comma/'va'-separated list (e.g. 'Chrome' or 'Telegram, Chrome, Spotify')"},
+            },
+            "required": ["app_name"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -917,6 +998,18 @@ class JarvisLive:
                 else:
                     self.ui.muted = False
                     result = "Microphone active."
+
+            elif name == "clipboard":
+                r = await loop.run_in_executor(None, lambda: clipboard_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "system_info":
+                r = await loop.run_in_executor(None, lambda: system_info_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "close_apps":
+                r = await loop.run_in_executor(None, lambda: close_apps_action(parameters=args, player=self.ui))
+                result = r or "Done."
 
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
