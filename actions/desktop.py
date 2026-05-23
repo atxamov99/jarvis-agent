@@ -12,7 +12,7 @@ from datetime import datetime
 try:
     import pyautogui
     _PYAUTOGUI = True
-except ImportError:
+except Exception:
     _PYAUTOGUI = False
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
@@ -103,9 +103,8 @@ def _execute_generated_code(code: str, player=None) -> str:
 
 def _ask_gemini_for_desktop_action(task: str) -> str:
 
-    import google.generativeai as genai
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    from google import genai
+    client = genai.Client(api_key=_get_api_key())
 
     desktop = str(_get_desktop())
 
@@ -143,7 +142,7 @@ Output ONLY the Python code. No explanation, no markdown, no backticks.
 Task: {task}"""
 
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         code = response.text.strip()
         if code.startswith("```"):
             lines = code.split("\n")

@@ -358,6 +358,39 @@ _OS_LAUNCHERS = {
     "Linux":   _launch_linux,
 }
 
+_MULTI_SEP_RE = re.compile(
+    r"\s*(?:,|;|/|\bva\b|\bband\b|\band\b|\bи\b|&|\+)\s*",
+    re.IGNORECASE,
+)
+
+
+def _split_app_names(raw: str) -> list[str]:
+    """Split a string like 'Telegram va Chrome' or 'WhatsApp, Spotify' into parts.
+
+    Returns a list of cleaned, non-empty app names in the original order.
+    """
+    parts = _MULTI_SEP_RE.split(raw)
+    return [p.strip() for p in parts if p and p.strip()]
+
+
+def _launch_one(app_name: str) -> str:
+    launcher   = _OS_LAUNCHERS.get(_SYSTEM)
+    normalized = _normalize(app_name)
+    print(f"[open_app] Launching: '{app_name}' → '{normalized}' ({_SYSTEM})")
+    try:
+        if launcher(normalized):
+            return f"Opened {app_name}."
+        if normalized.lower() != app_name.lower() and launcher(app_name):
+            return f"Opened {app_name}."
+        return (
+            f"Could not confirm that {app_name} launched. "
+            f"It may still be loading, or it might not be installed."
+        )
+    except Exception as e:
+        print(f"[open_app] Error: {e}")
+        return f"Failed to open {app_name}: {e}"
+
+
 def open_app(
     parameters=None,
     response=None,
@@ -369,26 +402,18 @@ def open_app(
     if not app_name:
         return "No application name provided."
 
-    launcher = _OS_LAUNCHERS.get(_SYSTEM)
-    if launcher is None:
+    if _OS_LAUNCHERS.get(_SYSTEM) is None:
         return f"Unsupported operating system: {_SYSTEM}"
 
-    normalized = _normalize(app_name)
-    print(f"[open_app] Launching: '{app_name}' → '{normalized}' ({_SYSTEM})")
+    apps = _split_app_names(app_name)
+    if not apps:
+        apps = [app_name]
 
     if player:
-        player.write_log(f"[open_app] {app_name}")
+        if len(apps) == 1:
+            player.write_log(f"[open_app] {apps[0]}")
+        else:
+            player.write_log(f"[open_app] {', '.join(apps)}")
 
-    try:
-        if launcher(normalized):
-            return f"Opened {app_name}."
-        if normalized.lower() != app_name.lower():
-            if launcher(app_name):
-                return f"Opened {app_name}."
-        return (
-            f"Could not confirm that {app_name} launched. "
-            f"It may still be loading, or it might not be installed."
-        )
-    except Exception as e:
-        print(f"[open_app] Error: {e}")
-        return f"Failed to open {app_name}: {e}"
+    results = [_launch_one(a) for a in apps]
+    return " ".join(results)

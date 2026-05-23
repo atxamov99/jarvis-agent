@@ -16,6 +16,46 @@ _SAFE_ROOTS: list[Path] = [
     Path.home(),
 ]
 
+
+def _read_xdg_user_dirs() -> dict[str, Path]:
+    """Parse ~/.config/user-dirs.dirs to get localized XDG paths.
+
+    Handles Linux locales like ru_RU.UTF-8 where Desktop is 'Рабочий стол',
+    Downloads is 'Загрузки', etc. Falls back to empty dict on Windows/macOS.
+    """
+    if _OS != "Linux":
+        return {}
+    cfg = Path.home() / ".config" / "user-dirs.dirs"
+    if not cfg.is_file():
+        return {}
+    result: dict[str, Path] = {}
+    try:
+        for line in cfg.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, raw = line.partition("=")
+            value = raw.strip().strip('"').replace("$HOME", str(Path.home()))
+            p = Path(value)
+            if p.exists():
+                result[key.strip()] = p
+    except Exception:
+        pass
+    return result
+
+
+_XDG_DIRS = _read_xdg_user_dirs()
+
+
+def _xdg_or_default(env_key: str, default_subdir: str) -> Path:
+    if _OS == "Linux":
+        xdg = os.environ.get(env_key, "")
+        if xdg and Path(xdg).exists():
+            return Path(xdg)
+        if env_key in _XDG_DIRS:
+            return _XDG_DIRS[env_key]
+    return Path.home() / default_subdir
+
 def _is_safe_path(target: Path) -> bool:
     """Verilen path _SAFE_ROOTS içinde mi? Değilse işlemi reddet."""
     try:
@@ -28,46 +68,22 @@ def _is_safe_path(target: Path) -> bool:
         return False
 
 def _get_desktop() -> Path:
-    if _OS == "Linux":
-        xdg = os.environ.get("XDG_DESKTOP_DIR", "")
-        if xdg and Path(xdg).exists():
-            return Path(xdg)
-    return Path.home() / "Desktop"
+    return _xdg_or_default("XDG_DESKTOP_DIR", "Desktop")
 
 def _get_downloads() -> Path:
-    if _OS == "Linux":
-        xdg = os.environ.get("XDG_DOWNLOAD_DIR", "")
-        if xdg and Path(xdg).exists():
-            return Path(xdg)
-    return Path.home() / "Downloads"
+    return _xdg_or_default("XDG_DOWNLOAD_DIR", "Downloads")
 
 def _get_documents() -> Path:
-    if _OS == "Linux":
-        xdg = os.environ.get("XDG_DOCUMENTS_DIR", "")
-        if xdg and Path(xdg).exists():
-            return Path(xdg)
-    return Path.home() / "Documents"
+    return _xdg_or_default("XDG_DOCUMENTS_DIR", "Documents")
 
 def _get_pictures() -> Path:
-    if _OS == "Linux":
-        xdg = os.environ.get("XDG_PICTURES_DIR", "")
-        if xdg and Path(xdg).exists():
-            return Path(xdg)
-    return Path.home() / "Pictures"
+    return _xdg_or_default("XDG_PICTURES_DIR", "Pictures")
 
 def _get_music() -> Path:
-    if _OS == "Linux":
-        xdg = os.environ.get("XDG_MUSIC_DIR", "")
-        if xdg and Path(xdg).exists():
-            return Path(xdg)
-    return Path.home() / "Music"
+    return _xdg_or_default("XDG_MUSIC_DIR", "Music")
 
 def _get_videos() -> Path:
-    if _OS == "Linux":
-        xdg = os.environ.get("XDG_VIDEOS_DIR", "")
-        if xdg and Path(xdg).exists():
-            return Path(xdg)
-    return Path.home() / "Videos"
+    return _xdg_or_default("XDG_VIDEOS_DIR", "Videos")
 
 
 def _resolve_path(raw: str) -> Path:

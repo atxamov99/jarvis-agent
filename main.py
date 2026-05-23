@@ -85,14 +85,17 @@ TOOL_DECLARATIONS = [
         "description": (
             "Opens any application on the computer. "
             "Use this whenever the user asks to open, launch, or start any app, "
-            "website, or program. Always call this tool — never just say you opened it."
+            "website, or program. Always call this tool — never just say you opened it. "
+            "MULTIPLE APPS: When the user asks to open more than one app at once "
+            "(e.g. 'Telegram va Chrome'ni och', 'open WhatsApp and Spotify'), call this tool "
+            "ONCE PER APP in sequence — do not skip any. Never combine multiple apps into a single call."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
                 "app_name": {
                     "type": "STRING",
-                    "description": "Exact name of the application (e.g. 'WhatsApp', 'Chrome', 'Spotify')"
+                    "description": "Exact name of ONE application (e.g. 'WhatsApp', 'Chrome', 'Spotify'). For multiple apps, call this tool multiple times — one call per app."
                 }
             },
             "required": ["app_name"]
