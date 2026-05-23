@@ -81,7 +81,18 @@ computer_settings: ALL single OS actions (volume, brightness, wifi, close, short
 web_search: For ANY factual question the user asks (news, prices, definitions, who/what/when/where, current events, comparisons, recipes, technical info) — call web_search immediately. Do not say "I don't know" — fetch the answer. The tool uses Google Search under the hood. Briefly summarize the result in Uzbek.
 browser_control → full browser automation: navigate, login, fill forms, scrape, click anything.
 translate_text: When the user says "tarjima qil", "oʻgir", "translate" or similar — call translate_text with text=<exactly what they said to translate> and target_language=<target language in English, e.g. 'english', 'russian', 'uzbek', 'turkish'>. If target language is not specified, default to 'uzbek'. After the tool returns, speak the translated text back FULLY (do not summarize or shorten translations).
-code_helper → write, edit, explain, run, or build code files (Python, JavaScript, React/JSX, TypeScript, HTML/CSS, etc.). When user asks "manga React komponenti yoz", "bitta funksiya yozib ber", "kod yoz", etc. — call code_helper with language matching the request (e.g. language="react" or "javascript" for React).
+code_helper → write, edit, explain, run, or build code files in any language. Supported: Python, JavaScript, TypeScript, React (JSX/TSX), Vue, Svelte, HTML, CSS/SCSS, Java, C/C++, Go, Rust, Ruby, PHP, Bash, SQL, JSON.
+  Trigger phrases (call IMMEDIATELY with action="write"):
+    • "reactda kod yoz", "React komponenti yoz", "JSX yoz" → language="react"
+    • "react typescript", "TSX yoz" → language="react-ts"
+    • "html sahifa yarat", "html yoz", "veb sahifa qil" → language="html"
+    • "css yoz", "styles qil", "tailwind" → language="css"
+    • "javascript funksiya", "JS yoz" → language="javascript"
+    • "typescript yoz", "TS funksiya" → language="typescript"
+    • "vue komponent" → language="vue"
+    • "python skript", "bitta funksiya yozib ber" (no language) → language="python"
+    • "manga bitta funksiyali kod yoz" → infer language from context; default python
+  Pass the user's request verbatim as `description`. File is auto-saved to Desktop.
 dev_agent → for full multi-file projects (3+ files): plans, writes, installs deps, runs and fixes.
 file_processor → any uploaded/dropped file.
 file_controller → list/create/delete/move files and folders. "Desktop", "Downloads", "Documents" are auto-resolved to localized Linux paths (Рабочий стол, Загрузки, Документы).

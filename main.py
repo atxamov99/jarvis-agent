@@ -325,14 +325,22 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "code_helper",
-        "description": "Writes, edits, explains, runs, or builds code files.",
+        "description": (
+            "Writes, edits, explains, runs, or builds code files in any modern language. "
+            "Supported languages include: Python, JavaScript, TypeScript, React (JSX/TSX), Vue, Svelte, "
+            "HTML, CSS/SCSS, Java, C/C++, Go, Rust, Ruby, PHP, Bash, SQL, JSON. "
+            "When the user says 'reactda kod yoz', 'manga React komponenti yoz', 'bitta funksiyali kod yoz', "
+            "'html sahifa yarat', 'css yoz', 'javascript funksiya yoz' etc. — call this tool with "
+            "action='write' and the appropriate language. Default language is python. "
+            "Output is saved to the user's Desktop unless output_path is provided."
+        ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
                 "action":      {"type": "STRING", "description": "write | edit | explain | run | build | auto (default: auto)"},
-                "description": {"type": "STRING", "description": "What the code should do or what change to make"},
-                "language":    {"type": "STRING", "description": "Programming language (default: python)"},
-                "output_path": {"type": "STRING", "description": "Where to save the file"},
+                "description": {"type": "STRING", "description": "What the code should do (e.g. 'a counter component with + and - buttons', 'function that reverses a string')"},
+                "language":    {"type": "STRING", "description": "Language: python | javascript | typescript | react | react-ts | vue | svelte | html | css | java | cpp | go | rust | bash | sql | json (default: python)"},
+                "output_path": {"type": "STRING", "description": "Where to save the file (optional — defaults to Desktop)"},
                 "file_path":   {"type": "STRING", "description": "Path to existing file for edit/explain/run/build"},
                 "code":        {"type": "STRING", "description": "Raw code string for explain"},
                 "args":        {"type": "STRING", "description": "CLI arguments for run/build"},

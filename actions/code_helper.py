@@ -42,21 +42,111 @@ def _clean_code(text: str) -> str:
     return text.strip()
 
 
+_LANG_EXT_MAP = {
+    "python": ".py", "py": ".py",
+    "javascript": ".js", "js": ".js",
+    "typescript": ".ts", "ts": ".ts",
+    "react": ".jsx", "jsx": ".jsx", "react.js": ".jsx", "reactjs": ".jsx",
+    "react-ts": ".tsx", "tsx": ".tsx", "react-typescript": ".tsx",
+    "vue": ".vue", "svelte": ".svelte",
+    "html": ".html", "css": ".css", "scss": ".scss", "sass": ".sass",
+    "java": ".java", "cpp": ".cpp", "c": ".c",
+    "bash": ".sh", "shell": ".sh", "powershell": ".ps1",
+    "sql": ".sql", "json": ".json", "rust": ".rs", "go": ".go",
+    "php": ".php", "ruby": ".rb", "kotlin": ".kt", "swift": ".swift",
+}
+
+
+def _normalize_language(raw: str) -> str:
+    """Normalize 'reactda', 'react js', 'React.js' etc. to a canonical key."""
+    key = (raw or "python").lower().strip()
+    key = re.sub(r"\.?(js|ts)$", lambda m: "." + m.group(1), key)
+    if "react" in key and ("ts" in key or "typescript" in key):
+        return "react-ts"
+    if "react" in key or "jsx" in key:
+        return "react"
+    if "vue" in key:
+        return "vue"
+    if "svelte" in key:
+        return "svelte"
+    return key
+
+
 def _resolve_save_path(output_path: str, language: str) -> Path:
-    ext_map = {
-        "python": ".py", "py": ".py",
-        "javascript": ".js", "js": ".js",
-        "typescript": ".ts", "ts": ".ts",
-        "html": ".html", "css": ".css",
-        "java": ".java", "cpp": ".cpp", "c": ".c",
-        "bash": ".sh", "shell": ".sh", "powershell": ".ps1",
-        "sql": ".sql", "json": ".json", "rust": ".rs", "go": ".go",
-    }
     if output_path:
         p = Path(output_path)
         return p if p.is_absolute() else DESKTOP / p
-    ext = ext_map.get((language or "python").lower(), ".py")
-    return DESKTOP / f"jarvis_code{ext}"
+    norm = _normalize_language(language)
+    ext = _LANG_EXT_MAP.get(norm, ".py")
+    # React components get a PascalCase file name by default
+    stem = "JarvisComponent" if norm in ("react", "react-ts") else "jarvis_code"
+    return DESKTOP / f"{stem}{ext}"
+
+
+_REACT_PROMPT_RULES = """
+React-specific rules:
+- Functional components only (no class components).
+- Use React hooks (useState, useEffect, useMemo, useCallback) where appropriate.
+- Component name must be PascalCase and exported as default.
+- Use modern JSX — no React.createElement calls.
+- Props are destructured in the function signature.
+- For TypeScript variants (.tsx): define proper Props interface or type.
+- Keep styling minimal and inline-friendly (Tailwind utility classes are fine if requested).
+- No `import React from 'react'` line — the new JSX transform handles it.
+- No CSS-in-JS unless explicitly asked.
+"""
+
+_HTML_PROMPT_RULES = """
+HTML-specific rules:
+- Use semantic HTML5 elements (header, nav, main, section, article, footer).
+- Always include <!DOCTYPE html>, <html lang="...">, <meta charset="UTF-8">, and a viewport meta.
+- Add a meaningful <title>.
+- Use proper accessibility: alt for images, label for form inputs, ARIA only when needed.
+- Inline <style> and <script> are OK for a single self-contained file.
+- For a standalone deliverable, embed CSS/JS in the file so it works by double-clicking.
+"""
+
+_CSS_PROMPT_RULES = """
+CSS-specific rules:
+- Use modern CSS: custom properties (--var), flexbox, grid, clamp(), :has(), :is().
+- Mobile-first with min-width media queries.
+- Prefer logical properties (margin-inline, padding-block) where applicable.
+- No vendor prefixes unless the user explicitly asks (autoprefixer handles them).
+- Group related rules; keep specificity low.
+"""
+
+_JS_PROMPT_RULES = """
+JavaScript-specific rules:
+- ES2022+ syntax. Use const/let, arrow functions, optional chaining, nullish coalescing.
+- Prefer async/await over .then() chains.
+- Use template literals over string concatenation.
+- Use early returns to flatten nested conditionals.
+- For DOM code: document.querySelector and addEventListener, not inline handlers.
+- No `var`. No callback-hell.
+"""
+
+_TS_PROMPT_RULES = """
+TypeScript-specific rules:
+- Strict types. Avoid `any`; use `unknown` then narrow.
+- Prefer `interface` for object shapes, `type` for unions/aliases.
+- Use const assertions and readonly where appropriate.
+- Discriminated unions for state modeling.
+- All function signatures explicitly typed.
+"""
+
+
+def _language_specific_rules(norm_lang: str) -> str:
+    if norm_lang in ("react", "react-ts"):
+        return _REACT_PROMPT_RULES + (_TS_PROMPT_RULES if norm_lang == "react-ts" else "")
+    if norm_lang == "html":
+        return _HTML_PROMPT_RULES
+    if norm_lang in ("css", "scss", "sass"):
+        return _CSS_PROMPT_RULES
+    if norm_lang in ("javascript", "js"):
+        return _JS_PROMPT_RULES
+    if norm_lang in ("typescript", "ts"):
+        return _TS_PROMPT_RULES
+    return ""
 
 
 def _read_file(file_path: str) -> tuple[str, str]:
@@ -150,18 +240,47 @@ def _detect_intent(description: str, file_path: str, code: str) -> str:
 
     return "write"
 
-def _write(description: str, language: str, output_path: str, player=None) -> tuple[str, Path]:
-    lang  = language or "python"
+def _detect_language_from_description(description: str, fallback: str) -> str:
+    """If user said 'reactda funksiya yoz' but didn't pass language='react', detect it."""
+    if fallback and fallback.lower() not in ("python", "py", ""):
+        return fallback
+    desc_low = description.lower()
+    if re.search(r"\breact(\s*js|\.js)?(\b|\s+da)?", desc_low) or "jsx" in desc_low:
+        return "react-ts" if "typescript" in desc_low or " ts " in desc_low else "react"
+    if "vue" in desc_low:
+        return "vue"
+    if "svelte" in desc_low:
+        return "svelte"
+    if re.search(r"\btypescript\b", desc_low):
+        return "typescript"
+    if re.search(r"\bjavascript\b|\bjs\b", desc_low):
+        return "javascript"
+    if re.search(r"\bhtml\b|\bweb\s*sahifa\b|\bveb\s*sahifa\b|landing\s*page", desc_low):
+        return "html"
+    if re.search(r"\bcss\b|\bstyles?\b|\btailwind\b|\bscss\b", desc_low):
+        return "css"
+    if re.search(r"\bbash\b|\bshell\b|\.sh\b", desc_low):
+        return "bash"
+    if re.search(r"\bsql\b|\bquery\b", desc_low) and "select" in desc_low:
+        return "sql"
+    return fallback or "python"
 
-    prompt = f"""You are an expert {lang} developer.
-Write clean, working, well-commented {lang} code for the description below.
+
+def _write(description: str, language: str, output_path: str, player=None) -> tuple[str, Path]:
+    lang       = _detect_language_from_description(description, language)
+    norm       = _normalize_language(lang)
+    extra_rules = _language_specific_rules(norm)
+    display    = "React (JSX)" if norm == "react" else "React + TypeScript (TSX)" if norm == "react-ts" else lang
+
+    prompt = f"""You are an expert {display} developer.
+Write clean, working, well-commented {display} code for the description below.
 
 Rules:
 - Output ONLY the code. No explanation, no markdown, no backticks.
-- Add helpful inline comments.
+- Add helpful inline comments only where the WHY isn't obvious.
 - Handle errors and edge cases properly.
 - Use modern best practices.
-
+{extra_rules}
 Description: {description}
 
 Code:"""
