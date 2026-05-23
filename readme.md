@@ -38,17 +38,53 @@ It's not just an assistant — it's an extension of your digital life.
 
 ---
 
-## ⚡ Quick Start
+## ⚡ Quick Start — One-Line Install
+
+**Linux / macOS:**
 
 ```bash
-git clone https://github.com/FatihMakes/Mark-XXXIX.git
-cd Mark-XXXIX
+curl -sSL https://raw.githubusercontent.com/atxamov99/jarvis-agent/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/atxamov99/jarvis-agent/main/install.ps1 | iex
+```
+
+The installer will:
+1. Check that Python 3.10+ and Git are installed
+2. Clone the repo to `~/jarvis-agent` (or `$HOME\jarvis-agent` on Windows)
+3. Create a virtualenv and install all dependencies
+4. Prompt you for your free Gemini API key (https://aistudio.google.com/apikey)
+5. Add a `jarvis` command to your shell
+6. Configure X11 autostart (Linux) or a Desktop shortcut (Windows)
+
+After install, open a new terminal and just type `jarvis` to launch.
+
+### Customize the install
+```bash
+JARVIS_HOME=/opt/jarvis JARVIS_BRANCH=yahyo bash install.sh
+```
+Override variables: `JARVIS_HOME` (install dir), `JARVIS_BRANCH` (git branch), `JARVIS_PYTHON` (python binary).
+
+---
+
+## 🛠️ Manual Install
+
+If you'd rather do it by hand:
+
+```bash
+git clone https://github.com/atxamov99/jarvis-agent.git
+cd jarvis-agent
+python3 -m venv venv
+source venv/bin/activate    # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-playwright install
+# Edit config/api_keys.json — add your Gemini API key
 python main.py
 ```
 
-> ⚠️ **Installation Note:** To keep the repository lightweight, some OS-specific dependencies are not bundled in `requirements.txt`. If you run into a `ModuleNotFoundError`, simply install the missing package via `pip install <module_name>` for your specific system.
+> ⚠️ **Note:** Some OS-specific dependencies aren't in `requirements.txt`. If you hit `ModuleNotFoundError`, install the missing package via `pip install <module_name>`.
 
 ---
 
