@@ -595,6 +595,21 @@ def _split_app_names(raw: str) -> list[str]:
     return [p.strip() for p in parts if p and p.strip()]
 
 
+def _find_child_ci(parent: Path, name: str) -> Path | None:
+    """Case-insensitive child lookup. Linux FS is case-sensitive but voice input
+    rarely is — 'project' should match 'Project'."""
+    if not parent.is_dir() or not name:
+        return None
+    direct = parent / name
+    if direct.exists():
+        return direct
+    target_low = name.lower()
+    for child in parent.iterdir():
+        if child.name.lower() == target_low:
+            return child
+    return None
+
+
 def _try_open_as_path(name: str) -> bool:
     """If `name` looks like (or resolves to) a file/folder on the user's machine,
     open it with the OS default handler. Returns True on success."""
@@ -604,7 +619,7 @@ def _try_open_as_path(name: str) -> bool:
     if raw.exists():
         candidates.append(raw)
 
-    # Probe common user dirs for a matching child
+    # Probe common user dirs for a matching child (case-insensitive)
     home = Path.home()
     search_roots = [
         home / "Рабочий стол",  # Russian locale Desktop
@@ -618,9 +633,9 @@ def _try_open_as_path(name: str) -> bool:
     for root in search_roots:
         if not root.exists():
             continue
-        candidate = root / name
-        if candidate.exists():
-            candidates.append(candidate)
+        found = _find_child_ci(root, name)
+        if found:
+            candidates.append(found)
             break
 
     if not candidates:

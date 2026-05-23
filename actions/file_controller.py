@@ -480,11 +480,30 @@ def organize_desktop() -> str:
         return f"Could not organize desktop: {e}"
 
 
+def _find_child_case_insensitive(parent: Path, name: str) -> Path | None:
+    """Return parent/name with the actual on-disk case, even if `name` casing differs.
+
+    Linux is case-sensitive, but users say 'project' for a folder named 'Project'.
+    We scan parent's children and pick the first case-insensitive match.
+    """
+    if not parent.is_dir() or not name:
+        return None
+    direct = parent / name
+    if direct.exists():
+        return direct
+    target_low = name.lower()
+    for child in parent.iterdir():
+        if child.name.lower() == target_low:
+            return child
+    return None
+
+
 def open_path(path: str, name: str = "") -> str:
     """Open a file or folder in the default OS handler (file manager / app).
 
     Works for paths like:
-      open_path("desktop", "Mark-XXXIX")           → opens that folder in file manager
+      open_path("desktop", "Project")              → opens that folder in file manager
+      open_path("desktop", "project")              → same folder, case-insensitive match
       open_path("/home/user/notes.txt")            → opens in default editor
       open_path("downloads")                       → opens Downloads in file manager
     """
@@ -492,13 +511,19 @@ def open_path(path: str, name: str = "") -> str:
     try:
         base   = _resolve_path(path)
         target = (base / name) if name else base
+        if name and not target.exists():
+            ci = _find_child_case_insensitive(base, name)
+            if ci:
+                target = ci
         if not target.exists():
-            # Try treating `path` as a folder name under Desktop as a fallback
-            desktop_try = _get_desktop() / (name or path)
-            if desktop_try.exists():
-                target = desktop_try
-            else:
-                return f"Not found: {target}"
+            # Fallback: maybe the user used `path` as the folder name (no `name` given)
+            for root in (_get_desktop(), _get_downloads(), _get_documents(), Path.home()):
+                ci = _find_child_case_insensitive(root, name or path)
+                if ci:
+                    target = ci
+                    break
+            if not target.exists():
+                return f"Not found: {name or path}"
         if not _is_safe_path(target):
             return f"Access denied: {target}"
 
