@@ -1,4 +1,7 @@
 sounddevice
+openai
+edge-tts
+soundfile
 google-genai
 google-generativeai
 pillow
