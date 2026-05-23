@@ -1381,31 +1381,25 @@ class JarvisOpenAI:
     # ── TTS ───────────────────────────────────────────────────────────
 
     def speak(self, text: str):
+        self.set_speaking(True)  # mark BEFORE thread starts to block mic
         threading.Thread(target=self._speak_bg, args=(text,), daemon=True).start()
 
     def _speak_bg(self, text: str):
         try:
-            import asyncio, io, wave
-            import edge_tts
-            import soundfile as sf
-
-            self.set_speaking(True)
-
-            async def _gen():
-                comm = edge_tts.Communicate(text, voice="en-US-GuyNeural")
-                audio_data = b""
-                async for chunk in comm.stream():
-                    if chunk["type"] == "audio":
-                        audio_data += chunk["data"]
-                return audio_data
-
-            audio_bytes = asyncio.run(_gen())
-            arr, sr = sf.read(io.BytesIO(audio_bytes))
-            import sounddevice as _sd
-            _sd.play(arr, sr)
-            _sd.wait()
+            # OpenAI TTS → PCM (24kHz, 16-bit, mono) — no format conversion needed
+            response = self._client.audio.speech.create(
+                model="tts-1",
+                voice="onyx",           # deep, authoritative — best for JARVIS
+                input=text,
+                response_format="pcm",  # raw signed-16 LE at 24 kHz
+            )
+            pcm = response.content
+            arr = np.frombuffer(pcm, dtype=np.int16)
+            sd.play(arr, samplerate=24000)
+            sd.wait()
         except Exception as e:
             print(f"[TTS] Error: {e}")
+            traceback.print_exc()
         finally:
             self.set_speaking(False)
 
@@ -1565,8 +1559,21 @@ class JarvisOpenAI:
 
             # Tool-call loop
             while msg.tool_calls:
-                # Append assistant's tool-call turn
-                self._history.append(msg.model_dump(exclude_unset=True))
+                # Append assistant's tool-call turn (must include tool_calls list)
+                assistant_entry = {"role": "assistant", "content": msg.content or ""}
+                if msg.tool_calls:
+                    assistant_entry["tool_calls"] = [
+                        {
+                            "id":   tc.id,
+                            "type": "function",
+                            "function": {
+                                "name":      tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ]
+                self._history.append(assistant_entry)
 
                 tool_results = []
                 for tc in msg.tool_calls:
