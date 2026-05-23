@@ -403,6 +403,21 @@ class HudCanvas(QWidget):
             for p in self._particles if p[4] > 0
         ]
 
+        # subtle idle ambient particles
+        if self.state not in ("STARTUP", "ERROR") and not self.speaking:
+            if random.random() < 0.04:
+                cx_p, cy_p = self.width() / 2, self.height() / 2
+                fw_p = min(self.width(), self.height())
+                ang  = random.uniform(0, 2 * math.pi)
+                r_s  = fw_p * random.uniform(0.22, 0.35)
+                self._particles.append([
+                    cx_p + math.cos(ang) * r_s,
+                    cy_p + math.sin(ang) * r_s,
+                    math.cos(ang) * random.uniform(0.3, 0.8),
+                    math.sin(ang) * random.uniform(0.3, 0.8) - 0.2,
+                    random.uniform(0.3, 0.6),  # lower max alpha for subtlety
+                ])
+
         self._blink_tick += 1
         if self._blink_tick >= 38:
             self._blink = not self._blink
@@ -442,12 +457,13 @@ class HudCanvas(QWidget):
             halo_col = C.PRI
 
         # halo glow
-        for i in range(10):
-            r   = r_face * (1.8 - i * 0.08)
-            frc = 1.0 - i / 10
-            a   = max(0, min(255, int(self._halo * 0.085 * frc)))
+        for i in range(14):
+            r   = r_face * (2.0 - i * 0.08)
+            frc = 1.0 - i / 14
+            a   = max(0, min(255, int(self._halo * 0.10 * frc)))
             col = qcol(halo_col, a)
-            p.setPen(QPen(col, 1.5)); p.setBrush(Qt.BrushStyle.NoBrush)
+            pen_w = 1.8 if i < 3 else 1.2 if i < 7 else 0.8
+            p.setPen(QPen(col, pen_w)); p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawEllipse(QRectF(cx - r, cy - r, r * 2, r * 2))
 
         # pulse rings
@@ -458,6 +474,7 @@ class HudCanvas(QWidget):
             p.drawEllipse(QRectF(cx - pr, cy - pr, pr * 2, pr * 2))
 
         # spinning arc rings
+        ring_thickness = 2.0 if state in ("SPEAKING", "EXECUTING") else 1.4
         for idx, (r_frac, w_r, arc_l, gap) in enumerate(
             [(0.48, 3, 115, 78), (0.40, 2, 78, 55), (0.32, 1, 56, 40)]
         ):
@@ -465,7 +482,8 @@ class HudCanvas(QWidget):
             base   = self._rings[idx]
             a_val  = max(0, min(255, int(self._halo * (1.0 - idx * 0.18))))
             col    = qcol(C.MUTED_C if self.muted else C.PRI, a_val)
-            p.setPen(QPen(col, w_r)); p.setBrush(Qt.BrushStyle.NoBrush)
+            effective_w = ring_thickness if idx < 2 else max(0.8, ring_thickness - 0.6)
+            p.setPen(QPen(col, effective_w)); p.setBrush(Qt.BrushStyle.NoBrush)
             angle = base
             rect  = QRectF(cx - ring_r, cy - ring_r, ring_r * 2, ring_r * 2)
             while angle < base + 360:
@@ -543,7 +561,7 @@ class HudCanvas(QWidget):
             p.setBrush(QBrush(qcol(C.PRI, a)))
             p.drawEllipse(QPointF(pt[0], pt[1]), 2.5, 2.5)
 
-        # STARTUP overlay — drawn on top of everything
+        # STARTUP boot text — replaces status text / waveform zone
         if self.state == "STARTUP":
             self._paint_startup(p, W, H)
             return
@@ -636,18 +654,20 @@ class HudCanvas(QWidget):
             self.state = "LISTENING" if not self.muted else "MUTED"
 
     def _paint_startup(self, p: QPainter, W: int, H: int):
-        # dark overlay
-        p.fillRect(self.rect(), qcol(C.BG, 230))
+        cx = W / 2 + self._shake_x
+        cy = H / 2
+        fw = min(W, H)
 
-        start_y = H * 0.25
-        line_h  = 18
+        start_y = cy + fw * 0.38
+        line_h  = 16
         visible = self._boot_lines[:self._boot_idx]
 
-        p.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        p.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
         for i, (text, color) in enumerate(visible):
             if not text:
                 continue
-            alpha = min(255, (self._boot_idx - i) * 40 + 180)
+            age   = self._boot_idx - i
+            alpha = min(220, age * 35 + 120)
             p.setPen(QPen(qcol(color, alpha), 1))
             p.drawText(
                 QRectF(0, start_y + i * line_h, W, line_h),
@@ -655,10 +675,9 @@ class HudCanvas(QWidget):
                 text,
             )
 
-        # blinking cursor on last visible line
         if not self._boot_done and self._blink and visible:
             last_idx = len(visible) - 1
-            p.setPen(QPen(qcol(C.PRI), 1))
+            p.setPen(QPen(qcol(C.PRI, 180), 1))
             p.drawText(
                 QRectF(0, start_y + (last_idx + 1) * line_h, W, line_h),
                 Qt.AlignmentFlag.AlignCenter,
