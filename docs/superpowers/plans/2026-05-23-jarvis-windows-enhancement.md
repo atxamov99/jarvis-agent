@@ -937,6 +937,97 @@ git push origin yahyo
 
 ---
 
+---
+
+## Task 11: Always-sleep mode — Jarvis only responds when called
+
+**Files:**
+- Modify: `main.py` — init block, `_on_wake_word`
+
+**Problem:** Jarvis only starts muted when openwakeword loads successfully (line ~761). If the model fails to init, Jarvis listens constantly. User wants Jarvis to ONLY respond when called.
+
+- [ ] **Step 1: Always start muted regardless of wake word availability**
+
+In `main.py`, find the wake-word init block (around line 756):
+
+```python
+        # Wake-word detector ("hey jarvis"). Starts muted; unmutes on wake.
+        self._wake_detector = None
+        if _WAKE_WORD_AVAILABLE:
+            try:
+                self._wake_detector = WakeWordDetector(on_wake=self._on_wake_word)
+                self.ui.muted = True
+                print("[JARVIS] 💤 Started in sleep mode — say 'hey jarvis' to wake")
+            except Exception as e:
+                print(f"[JARVIS] ⚠️ Wake-word init failed: {e}")
+                self._wake_detector = None
+```
+
+Replace with:
+
+```python
+        # Always start muted — user must say "hey jarvis" or press F4 to activate
+        self.ui.muted = True
+        self._wake_detector = None
+        if _WAKE_WORD_AVAILABLE:
+            try:
+                self._wake_detector = WakeWordDetector(on_wake=self._on_wake_word)
+                print("[JARVIS] 💤 Wake-word active — say 'hey jarvis' to wake")
+            except Exception as e:
+                print(f"[JARVIS] ⚠️ Wake-word init failed: {e}")
+                print("[JARVIS] 💤 Sleeping — press F4 to manually activate")
+                self._wake_detector = None
+        else:
+            print("[JARVIS] 💤 Sleeping — press F4 to activate (wake-word unavailable)")
+```
+
+- [ ] **Step 2: Log that wake-word fallback is F4**
+
+In `ui.py`, update the footer label to mention sleep mode:
+
+Find in `_build_footer`:
+```python
+        lay.addWidget(_fl("[F4] Mute  ·  [F11] Fullscreen"))
+```
+
+Replace with:
+```python
+        lay.addWidget(_fl("[F4] Wake/Sleep  ·  [F11] Fullscreen  ·  [Ctrl+Shift+C] Compact"))
+```
+
+- [ ] **Step 3: Verify openwakeword model is downloaded**
+
+Run in terminal:
+```
+python -c "import openwakeword; paths = openwakeword.get_pretrained_model_paths(); print([p for p in paths if 'hey_jarvis' in p])"
+```
+
+Expected: a list with at least one path containing `hey_jarvis`.
+
+If empty, download model:
+```
+python -c "import openwakeword; openwakeword.utils.download_models()"
+```
+
+- [ ] **Step 4: Integration test**
+
+Run `python main.py`:
+1. Jarvis starts — microphone icon shows MUTED / sleeping
+2. Say "hey jarvis" → mic unmutes, state → LISTENING
+3. Ask something → Jarvis responds
+4. Wait 8 seconds → auto-mutes back to sleep
+5. OR press F4 → manually wake/sleep
+
+- [ ] **Step 5: Commit and push**
+
+```
+git add main.py ui.py
+git commit -m "fix: always start in sleep mode, wake via hey-jarvis or F4"
+git push origin yahyo
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage check:**
@@ -956,6 +1047,7 @@ git push origin yahyo
 - ✅ push_notification API — Task 6
 - ✅ Compact mode — Task 9
 - ✅ STARTUP→LISTENING transition — Task 10
+- ✅ Always-sleep / wake-word-only mode — Task 11
 
 **Type/name consistency:**
 - `HudCanvas.set_audio_level(rms: float)` — defined Task 4 Step 1, used Task 4 Step 3 ✅
