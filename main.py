@@ -1083,6 +1083,12 @@ class JarvisLive:
                 arr = np.frombuffer(indata, dtype=np.int16)
                 rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
 
+                # Feed RMS level to UI waveform
+                try:
+                    self.ui._win.hud.set_audio_level(rms)
+                except Exception:
+                    pass
+
                 if rms >= _GATE_OPEN_RMS:
                     self._gate_attack_count += 1
                     if self._gate_attack_count >= _GATE_ATTACK:

@@ -14,8 +14,8 @@ from pathlib import Path
 import psutil
 
 from PyQt6.QtCore import (
-    QEasingCurve, QMimeData, QObject, QPointF, QRectF, QSize, Qt,
-    QTimer, QUrl, pyqtSignal,
+    QEasingCurve, QMimeData, QObject, QPointF, QPropertyAnimation, QRectF,
+    QSize, Qt, QTimer, QUrl, pyqtSignal,
 )
 from PyQt6.QtGui import (
     QBrush, QColor, QDragEnterEvent, QDropEvent, QFont, QFontDatabase,
@@ -348,12 +348,39 @@ class HudCanvas(QWidget):
         self._scale += (self._tgt_scale - self._scale) * sp
         self._halo  += (self._tgt_halo  - self._halo)  * sp
 
-        speeds = [1.3, -0.9, 2.0] if self.speaking else [0.55, -0.35, 0.9]
+        state = self.state
+
+        if state == "EXECUTING":
+            speeds = [2.5, -1.8, 3.5]
+            scan_spd, scan2_spd = 5.0, -3.5
+        elif state == "THINKING":
+            speeds = [1.8, -1.2, 2.8]
+            scan_spd, scan2_spd = 4.0, -2.5
+        elif self.speaking or state == "SPEAKING":
+            speeds = [1.3, -0.9, 2.0]
+            scan_spd, scan2_spd = 3.0, -2.0
+        elif state == "ERROR":
+            speeds = [3.5, -2.5, 4.0]
+            scan_spd, scan2_spd = 6.0, -4.0
+        else:
+            speeds = [0.55, -0.35, 0.9]
+            scan_spd, scan2_spd = 1.3, -0.75
+
         for i, spd in enumerate(speeds):
             self._rings[i] = (self._rings[i] + spd) % 360
+        self._scan  = (self._scan  + scan_spd)  % 360
+        self._scan2 = (self._scan2 + scan2_spd) % 360
 
-        self._scan  = (self._scan  + (3.0 if self.speaking else 1.3)) % 360
-        self._scan2 = (self._scan2 + (-2.0 if self.speaking else -0.75)) % 360
+        if state == "ERROR":
+            if self._error_ticks > 0:
+                self._error_ticks -= 1
+                amp = self._error_ticks / 40.0 * 4.0
+                self._shake_x = random.uniform(-amp, amp)
+            else:
+                self._shake_x = 0.0
+        else:
+            self._error_ticks = 0
+            self._shake_x = 0.0
 
         fw  = min(self.width(), self.height())
         lim = fw * 0.74
@@ -388,7 +415,8 @@ class HudCanvas(QWidget):
         p.fillRect(self.rect(), qcol(C.BG))
 
         W, H = self.width(), self.height()
-        cx, cy = W / 2, H / 2
+        cx = W / 2 + self._shake_x
+        cy = H / 2
         fw = min(W, H)
 
         # grid dots
@@ -399,12 +427,26 @@ class HudCanvas(QWidget):
 
         r_face = fw * 0.31
 
+        state = self.state
+        if self.muted:
+            halo_col = C.MUTED_C
+        elif state == "ERROR":
+            halo_col = C.RED
+        elif state == "EXECUTING":
+            halo_col = C.ACC
+        elif state == "THINKING":
+            halo_col = C.ACC2
+        elif state == "LISTENING":
+            halo_col = C.GREEN
+        else:
+            halo_col = C.PRI
+
         # halo glow
         for i in range(10):
             r   = r_face * (1.8 - i * 0.08)
             frc = 1.0 - i / 10
             a   = max(0, min(255, int(self._halo * 0.085 * frc)))
-            col = qcol(C.MUTED_C if self.muted else C.PRI, a)
+            col = qcol(halo_col, a)
             p.setPen(QPen(col, 1.5)); p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawEllipse(QRectF(cx - r, cy - r, r * 2, r * 2))
 
@@ -506,24 +548,40 @@ class HudCanvas(QWidget):
             self._paint_startup(p, W, H)
             return
 
+        # EXECUTING corner brackets
+        if self.state == "EXECUTING":
+            bracket_sz = 18
+            alpha = 160 + int(40 * math.sin(self._tick * 0.15))
+            p.setPen(QPen(qcol(C.ACC, alpha), 2))
+            for bx, by, dx, dy in [
+                (4, 4, 1, 1), (W-4, 4, -1, 1),
+                (4, H-4, 1, -1), (W-4, H-4, -1, -1),
+            ]:
+                p.drawLine(int(bx), int(by), int(bx + dx*bracket_sz), int(by))
+                p.drawLine(int(bx), int(by), int(bx), int(by + dy*bracket_sz))
+
         # status text
         sy = cy + fw * 0.40
+        state = self.state
         if self.muted:
-            txt, col = "⊘  MUTED",     qcol(C.MUTED_C)
-        elif self.speaking:
-            txt, col = "●  SPEAKING",  qcol(C.ACC)
-        elif self.state == "THINKING":
+            txt, col = "⊘  MUTED",          qcol(C.MUTED_C)
+        elif state == "SPEAKING":
+            txt, col = "●  SPEAKING",        qcol(C.PRI)
+        elif state == "THINKING":
             sym = "◈" if self._blink else "◇"
             txt, col = f"{sym}  THINKING",   qcol(C.ACC2)
-        elif self.state == "PROCESSING":
+        elif state == "EXECUTING":
             sym = "▷" if self._blink else "▶"
-            txt, col = f"{sym}  PROCESSING", qcol(C.ACC2)
-        elif self.state == "LISTENING":
+            txt, col = f"{sym}  EXECUTING",  qcol(C.ACC)
+        elif state == "ERROR":
+            sym = "✕" if self._blink else "!"
+            txt, col = f"{sym}  ERROR",      qcol(C.RED)
+        elif state == "LISTENING":
             sym = "●" if self._blink else "○"
             txt, col = f"{sym}  LISTENING",  qcol(C.GREEN)
         else:
             sym = "●" if self._blink else "○"
-            txt, col = f"{sym}  {self.state}", qcol(C.PRI)
+            txt, col = f"{sym}  {state}",    qcol(C.PRI)
 
         p.setPen(QPen(col, 1))
         p.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
@@ -533,16 +591,49 @@ class HudCanvas(QWidget):
         wy = sy + 30
         N, bw = 36, 8
         wx0 = (W - N * bw) / 2
+        state = self.state
         for i in range(N):
             if self.muted:
                 hgt, cl = 2, qcol(C.MUTED_C)
-            elif self.speaking:
-                hgt = random.randint(3, 20)
-                cl  = qcol(C.PRI) if hgt > 12 else qcol(C.PRI_DIM)
+            elif state == "SPEAKING":
+                phase = self._tick * 0.11 + i * 0.55
+                hgt = int(4 + 14 * abs(math.sin(phase)) * (0.6 + 0.4 * math.sin(phase * 1.7)))
+                cl  = qcol(C.PRI) if hgt > 10 else qcol(C.PRI_DIM)
+            elif state == "LISTENING":
+                base = self._audio_rms * 20
+                hgt  = max(2, int(base * (0.7 + 0.6 * abs(math.sin(i * 1.1 + self._tick * 0.05)))))
+                hgt  = min(hgt, 22)
+                cl   = qcol(C.GREEN) if hgt > 8 else qcol(C.GREEN_D)
+            elif state == "THINKING":
+                hgt = int(4 + 8 * abs(math.sin(self._tick * 0.18 + i * 0.4)))
+                cl  = qcol(C.ACC2)
+            elif state == "EXECUTING":
+                hgt = int(3 + 6 * abs(math.sin(self._tick * 0.22 + i * 0.3)))
+                cl  = qcol(C.ACC)
+            elif state == "ERROR":
+                hgt = int(3 + 12 * abs(math.sin(self._tick * 0.35 + i * 0.8)))
+                cl  = qcol(C.RED)
             else:
-                hgt = int(3 + 2 * math.sin(self._tick * 0.09 + i * 0.6))
-                cl  = qcol(C.BORDER_B)
-            p.fillRect(QRectF(wx0 + i * bw, wy + 20 - hgt, bw - 1, hgt), cl)
+                hgt = int(2 + 2 * math.sin(self._tick * 0.09 + i * 0.6))
+                cl  = qcol(C.PRI_DIM)
+
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(cl))
+            p.drawRect(
+                QRectF(wx0 + i * bw + 1, wy + (22 - hgt), bw - 2, hgt)
+            )
+
+    def set_audio_level(self, rms: float):
+        self._audio_rms = min(1.0, rms / 3000.0)
+
+    def trigger_error(self):
+        self.state = "ERROR"
+        self._error_ticks = 40
+        QTimer.singleShot(2000, self._clear_error)
+
+    def _clear_error(self):
+        if self.state == "ERROR":
+            self.state = "LISTENING" if not self.muted else "MUTED"
 
     def _paint_startup(self, p: QPainter, W: int, H: int):
         # dark overlay
@@ -1154,6 +1245,15 @@ class MainWindow(QMainWindow):
         sc_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
         sc_quit.activated.connect(self._real_quit)
 
+        # Fade-in on open
+        self.setWindowOpacity(0.0)
+        self._fade_in = QPropertyAnimation(self, b"windowOpacity")
+        self._fade_in.setDuration(1200)
+        self._fade_in.setStartValue(0.0)
+        self._fade_in.setEndValue(1.0)
+        self._fade_in.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._fade_in.start()
+
     def _save_geometry(self) -> None:
         try:
             import base64
@@ -1222,8 +1322,14 @@ class MainWindow(QMainWindow):
         self._save_geometry()
         if self._tray is not None:
             self._tray.hide()
-        from PyQt6.QtWidgets import QApplication
-        QApplication.instance().quit()
+
+        self._fade_out = QPropertyAnimation(self, b"windowOpacity")
+        self._fade_out.setDuration(800)
+        self._fade_out.setStartValue(self.windowOpacity())
+        self._fade_out.setEndValue(0.0)
+        self._fade_out.setEasingCurve(QEasingCurve.Type.InCubic)
+        self._fade_out.finished.connect(QApplication.instance().quit)
+        self._fade_out.start()
 
     def closeEvent(self, event):
         self._save_geometry()
