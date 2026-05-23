@@ -169,21 +169,28 @@ TOOL_DECLARATIONS = [
     {
         "name": "web_search",
         "description": (
-            "Search the web (powered by Google) for ANY factual question the user asks. "
-            "CALL THIS for: news, prices, current events, weather facts, dates, biographies, "
+            "Search the web for ANY factual question. Uses a multi-backend chain: "
+            "Wikipedia (for 'what/who is X' queries) → Gemini google_search → DuckDuckGo → direct Google scrape. "
+            "ALWAYS returns something — never gives up. "
+            "CALL THIS IMMEDIATELY for: news, prices, current events, weather facts, dates, biographies, "
             "definitions, sports results, currency rates, recipes, addresses, opening hours, "
-            "technical/programming questions, product comparisons, or ANY 'who/what/when/where/why/how' question. "
-            "NEVER say 'I don't know' or 'I can't access the internet' — call this tool instead. "
-            "When the user asks something factual that you don't have memorized, call web_search immediately. "
-            "After getting results, summarize them BRIEFLY in the SAME language the user spoke (2-4 sentences)."
+            "technical/programming questions, product comparisons, ANY 'kim/nima/qachon/qayerda/qancha/qanday/who/what/when/where/why/how' question. "
+            "MODES:"
+            "  • mode='search' (default) — general web search "
+            "  • mode='news'  — recent news (adds 'latest news' to the query) "
+            "  • mode='url'   — fetch + extract readable text from a specific URL (use the `url` param) "
+            "  • mode='compare' — compare items (use the `items` array + `aspect`) "
+            "NEVER say 'I don't know', 'kechirasiz topa olmadim', 'internet yo'q' — JUST CALL THIS TOOL. "
+            "After it returns, summarize BRIEFLY in Uzbek (2-4 sentences)."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "query":  {"type": "STRING", "description": "Search query"},
-                "mode":   {"type": "STRING", "description": "search (default) or compare"},
-                "items":  {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Items to compare"},
-                "aspect": {"type": "STRING", "description": "price | specs | reviews"}
+                "query":  {"type": "STRING", "description": "Search query in the user's natural language"},
+                "mode":   {"type": "STRING", "description": "search (default) | news | url | compare"},
+                "url":    {"type": "STRING", "description": "URL to fetch when mode='url'"},
+                "items":  {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Items to compare (compare mode)"},
+                "aspect": {"type": "STRING", "description": "price | specs | reviews | general (compare mode)"}
             },
             "required": ["query"]
         }

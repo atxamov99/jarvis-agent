@@ -4,6 +4,7 @@ google-generativeai
 pillow
 requests
 beautifulsoup4
+readability-lxml
 duckduckgo-search
 playwright          
 pyautogui
