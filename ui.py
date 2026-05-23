@@ -314,14 +314,22 @@ class HudCanvas(QWidget):
         self._tick += 1
 
         # advance STARTUP boot sequence
-        if self.state == "STARTUP" and not self._boot_done:
-            if time.time() - self._boot_t > 0.30:
-                self._boot_t = time.time()
-                self._boot_idx += 1
-                if self._boot_idx >= len(self._boot_lines):
-                    self._boot_done = True
-            self.update()
-            return
+        if self.state == "STARTUP":
+            if not self._boot_done:
+                if time.time() - self._boot_t > 0.30:
+                    self._boot_t = time.time()
+                    self._boot_idx += 1
+                    if self._boot_idx >= len(self._boot_lines):
+                        self._boot_done = True
+                        self._boot_t = time.time()  # reuse as done-timestamp
+                self.update()
+                return
+            else:
+                # hold final state 1.5s then transition to IDLE
+                if time.time() - self._boot_t > 1.5:
+                    self.state = "IDLE"
+                self.update()
+                return
 
         now = time.time()
         if now - self._last_t > (0.12 if self.speaking else 0.5):
@@ -496,7 +504,6 @@ class HudCanvas(QWidget):
         # STARTUP overlay — drawn on top of everything
         if self.state == "STARTUP":
             self._paint_startup(p, W, H)
-            p.end()
             return
 
         # status text
