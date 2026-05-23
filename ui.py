@@ -1149,6 +1149,153 @@ class SetupOverlay(QWidget):
         self.done.emit(key, self._sel_os)
 
 
+class WeatherPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(
+            f"background: {C.PANEL2}; border: 1px solid {C.BORDER_A}; border-radius: 4px;"
+        )
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 6, 8, 6)
+        lay.setSpacing(2)
+
+        hdr = QLabel("▸ WEATHER")
+        hdr.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        hdr.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; border: none;")
+        lay.addWidget(hdr)
+
+        self._main_lbl = QLabel("--°C  —")
+        self._main_lbl.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
+        self._main_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent; border: none;")
+        lay.addWidget(self._main_lbl)
+
+        self._sub_lbl = QLabel("Loading...")
+        self._sub_lbl.setFont(QFont("Courier New", 7))
+        self._sub_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; border: none;")
+        lay.addWidget(self._sub_lbl)
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._refresh)
+        self._timer.start(600_000)
+        QTimer.singleShot(800, self._refresh)
+
+    def _refresh(self):
+        threading.Thread(target=self._fetch, daemon=True).start()
+
+    def _fetch(self):
+        try:
+            import requests as _req
+            cfg = {}
+            if API_FILE.exists():
+                cfg = json.loads(API_FILE.read_text(encoding="utf-8"))
+            city = cfg.get("city", "Tashkent")
+            r = _req.get(
+                f"https://wttr.in/{city}?format=j1",
+                timeout=8,
+                headers={"User-Agent": "JARVIS/1.0"},
+            )
+            if r.status_code == 200:
+                d    = r.json()
+                curr = d["current_condition"][0]
+                temp = curr["temp_C"]
+                desc = curr["weatherDesc"][0]["value"]
+                self._main_lbl.setText(f"{temp}°C")
+                self._sub_lbl.setText(f"{desc}  ·  {city}")
+            else:
+                self._sub_lbl.setText("UNAVAILABLE")
+        except Exception:
+            self._sub_lbl.setText("OFFLINE")
+
+
+class TasksPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(80)
+        self.setStyleSheet(
+            f"background: {C.PANEL2}; border: 1px solid {C.BORDER_A}; border-radius: 4px;"
+        )
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 5, 8, 5)
+        lay.setSpacing(2)
+
+        hdr = QLabel("▸ ACTIVE TASKS")
+        hdr.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        hdr.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; border: none;")
+        lay.addWidget(hdr)
+
+        self._labels: list[QLabel] = []
+        for _ in range(3):
+            lbl = QLabel("")
+            lbl.setFont(QFont("Courier New", 7))
+            lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; border: none;")
+            lay.addWidget(lbl)
+            self._labels.append(lbl)
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._refresh)
+        self._timer.start(1000)
+
+    def _refresh(self):
+        from agent.task_queue import get_queue
+        try:
+            tasks = get_queue().get_all_statuses()[-3:]
+        except Exception:
+            tasks = []
+        _icons = {"running": "⟳", "completed": "✓", "failed": "✕",
+                  "pending": "…", "cancelled": "–"}
+        _cols  = {"running": C.PRI, "completed": C.GREEN, "failed": C.RED,
+                  "pending": C.ACC2, "cancelled": C.TEXT_DIM}
+        for i, lbl in enumerate(self._labels):
+            if i < len(tasks):
+                t   = tasks[i]
+                ico = _icons.get(t["status"], "?")
+                col = _cols.get(t["status"], C.TEXT_DIM)
+                lbl.setText(f"{ico} {t['goal'][:34]}")
+                lbl.setStyleSheet(f"color: {col}; background: transparent; border: none;")
+            else:
+                lbl.setText("")
+
+
+class NotificationsPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(82)
+        self.setStyleSheet(
+            f"background: {C.PANEL2}; border: 1px solid {C.BORDER_A}; border-radius: 4px;"
+        )
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 5, 8, 5)
+        lay.setSpacing(2)
+
+        hdr = QLabel("▸ NOTIFICATIONS")
+        hdr.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        hdr.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; border: none;")
+        lay.addWidget(hdr)
+
+        self._labels: list[QLabel] = []
+        for _ in range(3):
+            lbl = QLabel("")
+            lbl.setFont(QFont("Courier New", 7))
+            lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; border: none;")
+            lay.addWidget(lbl)
+            self._labels.append(lbl)
+
+        self._items: list[str] = []
+
+    def push(self, text: str):
+        ts   = time.strftime("%H:%M")
+        line = f"[{ts}] {text[:42]}"
+        self._items.append(line)
+        if len(self._items) > 3:
+            self._items.pop(0)
+        for i, lbl in enumerate(self._labels):
+            if i < len(self._items):
+                lbl.setText(self._items[i])
+                lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; border: none;")
+            else:
+                lbl.setText("")
+
+
 class MainWindow(QMainWindow):
     _log_sig   = pyqtSignal(str)
     _state_sig = pyqtSignal(str)
@@ -1198,7 +1345,8 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(self._build_header())
+        self._header = self._build_header()
+        root.addWidget(self._header)
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
@@ -1216,7 +1364,8 @@ class MainWindow(QMainWindow):
         body.addWidget(self._right_panel, stretch=0)
 
         root.addLayout(body, stretch=1)
-        root.addWidget(self._build_footer())
+        self._footer = self._build_footer()
+        root.addWidget(self._footer)
 
         self._clock_tmr = QTimer(self)
         self._clock_tmr.timeout.connect(self._tick_clock)
@@ -1245,6 +1394,11 @@ class MainWindow(QMainWindow):
         sc_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
         sc_quit.activated.connect(self._real_quit)
 
+        self._compact = False
+        self._normal_size = None
+        compact_sc = QShortcut(QKeySequence("Ctrl+Shift+C"), self)
+        compact_sc.activated.connect(self._toggle_compact)
+
         # Fade-in on open
         self.setWindowOpacity(0.0)
         self._fade_in = QPropertyAnimation(self, b"windowOpacity")
@@ -1265,6 +1419,24 @@ class MainWindow(QMainWindow):
             API_FILE.write_text(json.dumps(cfg, indent=4), encoding="utf-8")
         except Exception:
             pass
+
+    def _toggle_compact(self):
+        if self._compact:
+            self._compact = False
+            self._left_panel.show()
+            self._right_panel.show()
+            self._header.show()
+            self._footer.show()
+            if self._normal_size:
+                self.resize(self._normal_size)
+        else:
+            self._compact = True
+            self._normal_size = self.size()
+            self._left_panel.hide()
+            self._right_panel.hide()
+            self._header.hide()
+            self._footer.hide()
+            self.resize(320, 200)
 
     def _ensure_tray(self) -> bool:
         """Lazily create a system tray icon. Returns True if a tray is available."""
@@ -1561,6 +1733,13 @@ class MainWindow(QMainWindow):
         self._log = LogWidget()
         lay.addWidget(self._log, stretch=1)
 
+        self._weather = WeatherPanel()
+        lay.addWidget(self._weather)
+
+        sep0 = QFrame(); sep0.setFrameShape(QFrame.Shape.HLine)
+        sep0.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
+        lay.addWidget(sep0)
+
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
         lay.addWidget(sep)
@@ -1607,6 +1786,16 @@ class MainWindow(QMainWindow):
         fs_btn.clicked.connect(self._toggle_fullscreen)
         lay.addWidget(fs_btn)
 
+        sep3 = QFrame(); sep3.setFrameShape(QFrame.Shape.HLine)
+        sep3.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
+        lay.addWidget(sep3)
+
+        self._tasks_panel = TasksPanel()
+        lay.addWidget(self._tasks_panel)
+
+        self._notif_panel = NotificationsPanel()
+        lay.addWidget(self._notif_panel)
+
         return w
 
     def _build_input_row(self) -> QHBoxLayout:
@@ -1651,12 +1840,15 @@ class MainWindow(QMainWindow):
             l.setStyleSheet(f"color: {color}; background: transparent;")
             return l
 
-        lay.addWidget(_fl("[F4] Mute  ·  [F11] Fullscreen"))
+        lay.addWidget(_fl("[F4] Wake/Sleep  ·  [F11] Fullscreen  ·  [Ctrl+Shift+C] Compact"))
         lay.addStretch()
         lay.addWidget(_fl("FatihMakes Industries  ·  MARK XXXIX  ·  CLASSIFIED"))
         lay.addStretch()
         lay.addWidget(_fl("© FATIHMAKES", C.PRI_DIM))
         return w
+
+    def push_notification(self, text: str):
+        self._notif_panel.push(text)
 
     def _on_file_selected(self, path: str):
         self._current_file = path
@@ -1807,6 +1999,9 @@ class JarvisUI:
     def wait_for_api_key(self):
         while not self._win._ready:
             time.sleep(0.1)
+
+    def push_notification(self, text: str):
+        self._win.push_notification(text)
 
     def start_speaking(self):
         self.set_state("SPEAKING")

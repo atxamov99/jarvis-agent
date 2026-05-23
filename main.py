@@ -3,10 +3,12 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import asyncio
+import os
 import re
 import threading
 import json
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -62,6 +64,27 @@ def get_base_dir():
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent
+
+
+def _register_startup_windows() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import shutil
+        startup_dir = Path(os.environ.get("APPDATA", "")) / \
+            "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+        if not startup_dir.exists():
+            return
+        dst = startup_dir / "JARVIS.bat"
+        src = Path(__file__).parent / "start.bat"
+        if dst.exists():
+            return
+        if not src.exists():
+            return
+        shutil.copy2(src, dst)
+        print(f"[JARVIS] Auto-startup registered: {dst}")
+    except Exception as e:
+        print(f"[JARVIS] Could not register startup: {e}")
 
 
 BASE_DIR        = get_base_dir()
@@ -753,16 +776,19 @@ class JarvisLive:
         self._gate_attack_count = 0
         self._gate_hold_count   = 0
 
-        # Wake-word detector ("hey jarvis"). Starts muted; unmutes on wake.
+        # Wake-word detector ("hey jarvis"). Always starts muted; unmutes on wake or F4.
+        self.ui.muted = True
         self._wake_detector = None
         if _WAKE_WORD_AVAILABLE:
             try:
                 self._wake_detector = WakeWordDetector(on_wake=self._on_wake_word)
-                self.ui.muted = True
-                print("[JARVIS] 💤 Started in sleep mode — say 'hey jarvis' to wake")
+                print("[JARVIS] 💤 Wake-word active — say 'hey jarvis' to wake")
             except Exception as e:
                 print(f"[JARVIS] ⚠️ Wake-word init failed: {e}")
+                print("[JARVIS] 💤 Sleeping — press F4 to activate")
                 self._wake_detector = None
+        else:
+            print("[JARVIS] 💤 Sleeping — press F4 to activate (wake-word unavailable)")
 
     def _on_wake_word(self):
         """Called by WakeWordDetector when 'hey jarvis' is heard."""
@@ -861,7 +887,7 @@ class JarvisLive:
         args = dict(fc.args or {})
 
         print(f"[JARVIS] 🔧 {name}  {args}")
-        self.ui.set_state("THINKING")
+        self.ui.set_state("EXECUTING")
 
         if name == "save_memory":
             category = args.get("category", "notes")
@@ -1045,6 +1071,7 @@ class JarvisLive:
                 result = f"Unknown tool: {name}"
 
         except Exception as e:
+            self.ui._win.hud.trigger_error()
             result = f"Tool '{name}' failed: {e}"
             traceback.print_exc()
             self.speak_error(name, e)
@@ -1160,6 +1187,7 @@ class JarvisLive:
                             full_out = " ".join(out_buf).strip()
                             if full_out:
                                 self.ui.write_log(f"Jarvis: {full_out}")
+                                self.ui.push_notification(full_out[:60] if full_out else "Response received")
                             out_buf = []
 
                     if response.tool_call:
@@ -1238,6 +1266,7 @@ class JarvisLive:
                     print("[JARVIS] ✅ Connected.")
                     self.ui.set_state("LISTENING")
                     self.ui.write_log("SYS: JARVIS online.")
+                    self.ui.push_notification("JARVIS systems online")
                     self.speak("JARVIS systems online. Ready.")
 
                     tg.create_task(self._send_realtime())
@@ -1291,4 +1320,5 @@ def main():
     ui.root.mainloop()
 
 if __name__ == "__main__":
+    _register_startup_windows()
     main()
