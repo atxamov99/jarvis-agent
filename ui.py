@@ -269,6 +269,26 @@ class HudCanvas(QWidget):
         self._face_px: QPixmap | None = None
         self._load_face(face_path)
 
+        self._audio_rms: float = 0.0
+        self._error_ticks: int = 0
+        self._shake_x: float = 0.0
+
+        # STARTUP boot sequence
+        self._boot_lines: list[tuple[str, str]] = [
+            ("INITIALISING CORE SYSTEMS...", "#00d4ff"),
+            ("", ""),
+            ("VOICE SYSTEM.......... OK",    "#00ff88"),
+            ("MEMORY MODULE......... OK",    "#00ff88"),
+            ("AUTOMATION ENGINE..... OK",    "#00ff88"),
+            ("GEMINI API............ CONNECTING", "#ffcc00"),
+            ("GEMINI API............ ONLINE", "#00ff88"),
+            ("", ""),
+            ("J.A.R.V.I.S SYSTEMS ONLINE.", "#00d4ff"),
+        ]
+        self._boot_idx:  int   = 0
+        self._boot_t:    float = time.time()
+        self._boot_done: bool  = False
+
         self._tmr = QTimer(self)
         self._tmr.timeout.connect(self._step)
         self._tmr.start(16)
@@ -292,6 +312,17 @@ class HudCanvas(QWidget):
 
     def _step(self):
         self._tick += 1
+
+        # advance STARTUP boot sequence
+        if self.state == "STARTUP" and not self._boot_done:
+            if time.time() - self._boot_t > 0.30:
+                self._boot_t = time.time()
+                self._boot_idx += 1
+                if self._boot_idx >= len(self._boot_lines):
+                    self._boot_done = True
+            self.update()
+            return
+
         now = time.time()
         if now - self._last_t > (0.12 if self.speaking else 0.5):
             if self.speaking:
@@ -462,6 +493,12 @@ class HudCanvas(QWidget):
             p.setBrush(QBrush(qcol(C.PRI, a)))
             p.drawEllipse(QPointF(pt[0], pt[1]), 2.5, 2.5)
 
+        # STARTUP overlay — drawn on top of everything
+        if self.state == "STARTUP":
+            self._paint_startup(p, W, H)
+            p.end()
+            return
+
         # status text
         sy = cy + fw * 0.40
         if self.muted:
@@ -499,6 +536,36 @@ class HudCanvas(QWidget):
                 hgt = int(3 + 2 * math.sin(self._tick * 0.09 + i * 0.6))
                 cl  = qcol(C.BORDER_B)
             p.fillRect(QRectF(wx0 + i * bw, wy + 20 - hgt, bw - 1, hgt), cl)
+
+    def _paint_startup(self, p: QPainter, W: int, H: int):
+        # dark overlay
+        p.fillRect(self.rect(), qcol(C.BG, 230))
+
+        start_y = H * 0.25
+        line_h  = 18
+        visible = self._boot_lines[:self._boot_idx]
+
+        p.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        for i, (text, color) in enumerate(visible):
+            if not text:
+                continue
+            alpha = min(255, (self._boot_idx - i) * 40 + 180)
+            p.setPen(QPen(qcol(color, alpha), 1))
+            p.drawText(
+                QRectF(0, start_y + i * line_h, W, line_h),
+                Qt.AlignmentFlag.AlignCenter,
+                text,
+            )
+
+        # blinking cursor on last visible line
+        if not self._boot_done and self._blink and visible:
+            last_idx = len(visible) - 1
+            p.setPen(QPen(qcol(C.PRI), 1))
+            p.drawText(
+                QRectF(0, start_y + (last_idx + 1) * line_h, W, line_h),
+                Qt.AlignmentFlag.AlignCenter,
+                "▋",
+            )
 
 class MetricBar(QWidget):
 
@@ -1043,6 +1110,7 @@ class MainWindow(QMainWindow):
         body.addWidget(self._left_panel, stretch=0)
 
         self.hud = HudCanvas(face_path)
+        self.hud.state = "STARTUP"
         self.hud.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         body.addWidget(self.hud, stretch=5)
 
