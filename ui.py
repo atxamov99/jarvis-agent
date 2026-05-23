@@ -995,13 +995,29 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon(face_path))
         self.setWindowTitle("J.A.R.V.I.S — MARK XXXIX")
         self.setMinimumSize(_MIN_W, _MIN_H)
-        self.resize(_DEFAULT_W, _DEFAULT_H)
 
-        screen = QApplication.primaryScreen().availableGeometry()
-        self.move(
-            (screen.width()  - _DEFAULT_W) // 2,
-            (screen.height() - _DEFAULT_H) // 2,
-        )
+        # Restore saved geometry or center on screen
+        self._geometry_key = "window_geometry"
+        restored = False
+        try:
+            if API_FILE.exists():
+                cfg = json.loads(API_FILE.read_text(encoding="utf-8"))
+                geo = cfg.get(self._geometry_key)
+                if geo:
+                    from PyQt6.QtCore import QByteArray
+                    import base64
+                    self.restoreGeometry(QByteArray(base64.b64decode(geo)))
+                    restored = True
+        except Exception:
+            pass
+
+        if not restored:
+            self.resize(_DEFAULT_W, _DEFAULT_H)
+            screen = QApplication.primaryScreen().availableGeometry()
+            self.move(
+                (screen.width()  - _DEFAULT_W) // 2,
+                (screen.height() - _DEFAULT_H) // 2,
+            )
 
         self.on_text_command  = None
         self._muted           = False
@@ -1057,6 +1073,19 @@ class MainWindow(QMainWindow):
         sc_mute.activated.connect(self._toggle_mute)
         sc_full = QShortcut(QKeySequence("F11"), self)
         sc_full.activated.connect(self._toggle_fullscreen)
+
+    def closeEvent(self, event):
+        try:
+            import base64
+            geo_b64 = base64.b64encode(bytes(self.saveGeometry())).decode()
+            cfg = {}
+            if API_FILE.exists():
+                cfg = json.loads(API_FILE.read_text(encoding="utf-8"))
+            cfg[self._geometry_key] = geo_b64
+            API_FILE.write_text(json.dumps(cfg, indent=4), encoding="utf-8")
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def _toggle_fullscreen(self):
         if self.isFullScreen():

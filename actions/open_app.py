@@ -148,53 +148,275 @@ _APP_ALIASES: dict[str, dict[str, str]] = {
 }
 
 
+def _steam_library_paths() -> list[Path]:
+    """Return all Steam library roots from libraryfolders.vdf."""
+    roots: list[Path] = []
+    default = Path("C:/Program Files (x86)/Steam")
+    candidates = [default]
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"SOFTWARE\WOW6432Node\Valve\Steam")
+        install_path = winreg.QueryValueEx(key, "InstallPath")[0]
+        candidates.insert(0, Path(install_path))
+    except Exception:
+        pass
+
+    for steam_root in candidates:
+        vdf = steam_root / "steamapps" / "libraryfolders.vdf"
+        if vdf.exists():
+            roots.append(steam_root)
+            try:
+                text = vdf.read_text(encoding="utf-8", errors="ignore")
+                for m in re.finditer(r'"path"\s+"([^"]+)"', text):
+                    p = Path(m.group(1))
+                    if p.is_dir():
+                        roots.append(p)
+            except Exception:
+                pass
+    return roots
+
+
+def _steam_appid_for_dir(steam_root: Path, game_dir_name: str) -> str | None:
+    """Look up Steam App ID from appmanifest_*.acf files."""
+    acf_dir = steam_root / "steamapps"
+    if not acf_dir.is_dir():
+        return None
+    q = game_dir_name.lower()
+    for acf in acf_dir.glob("appmanifest_*.acf"):
+        try:
+            text = acf.read_text(encoding="utf-8", errors="ignore")
+            install_m = re.search(r'"installdir"\s+"([^"]+)"', text)
+            if install_m and install_m.group(1).lower() == q:
+                appid_m = re.search(r'"appid"\s+"(\d+)"', text)
+                if appid_m:
+                    return appid_m.group(1)
+        except Exception:
+            pass
+    return None
+
+
+def _find_steam_exe() -> Path | None:
+    for lib in _steam_library_paths():
+        exe = lib / "steam.exe"
+        if exe.exists():
+            return exe
+    default = Path("C:/Program Files (x86)/Steam/steam.exe")
+    return default if default.exists() else None
+
+
+def _find_game_exe(query: str) -> tuple[Path, str | None] | None:
+    """Search Steam/Epic library folders for a game.
+    Returns (exe_path, steam_appid_or_None)."""
+    q = re.sub(r"[^a-z0-9]", "", query.lower())
+
+    steam_libs = _steam_library_paths()
+    search_roots: list[tuple[Path, Path | None]] = []  # (games_root, steam_root)
+    for lib in steam_libs:
+        search_roots.append((lib / "steamapps" / "common", lib))
+
+    for epic_root in [
+        Path("C:/Program Files/Epic Games"),
+        Path("C:/Program Files (x86)/Epic Games"),
+    ]:
+        if epic_root.is_dir():
+            search_roots.append((epic_root, None))
+
+    best: tuple[int, Path, str | None] | None = None
+    for root, steam_root in search_roots:
+        if not root.is_dir():
+            continue
+        for game_dir in root.iterdir():
+            if not game_dir.is_dir():
+                continue
+            dir_norm = re.sub(r"[^a-z0-9]", "", game_dir.name.lower())
+            if q not in dir_norm and dir_norm not in q:
+                continue
+            appid = _steam_appid_for_dir(steam_root, game_dir.name) if steam_root else None
+            for exe in sorted(game_dir.glob("*.exe")):
+                n = exe.name.lower()
+                if any(x in n for x in ("unins", "crash", "setup", "redist",
+                                        "update", "helper", "launcher_helper")):
+                    continue
+                score = 100 if re.sub(r"[^a-z0-9]", "", n[:-4]) == dir_norm else 50
+                if best is None or score > best[0]:
+                    best = (score, exe, appid)
+    return (best[1], best[2]) if best else None
+
+
+def _search_registry(query: str) -> str | None:
+    """Search HKLM App Paths registry for an installed exe."""
+    if _SYSTEM != "Windows":
+        return None
+    q = re.sub(r"[^a-z0-9]", "", query.lower())
+    try:
+        import winreg
+        for hive in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
+            for subkey_path in [
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths",
+                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths",
+            ]:
+                try:
+                    key = winreg.OpenKey(hive, subkey_path)
+                except OSError:
+                    continue
+                i = 0
+                while True:
+                    try:
+                        name = winreg.EnumKey(key, i); i += 1
+                    except OSError:
+                        break
+                    name_norm = re.sub(r"[^a-z0-9]", "", name.lower().replace(".exe", ""))
+                    if q not in name_norm and name_norm not in q:
+                        continue
+                    try:
+                        subkey = winreg.OpenKey(key, name)
+                        path = winreg.QueryValue(subkey, "")
+                        path = path.strip('"').strip()
+                        if path and Path(path).exists():
+                            print(f"[open_app] Registry hit: {path}")
+                            return path
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_lnk(lnk_path: Path) -> str | None:
+    """Resolve a .lnk shortcut to its target exe path."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"(New-Object -COM WScript.Shell).CreateShortcut('{lnk_path}').TargetPath"],
+            capture_output=True, text=True, timeout=4,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        target = result.stdout.strip()
+        if target and Path(target).exists():
+            return target
+    except Exception:
+        pass
+    return None
+
+
+_SKIP_EXE = {"update.exe", "uninstall.exe", "unins000.exe", "setup.exe",
+             "crashpad_handler.exe", "crashreporter.exe", "helper.exe"}
+
+def _search_start_menu(query: str) -> str | None:
+    """Search Start Menu .lnk shortcuts and resolve them to exe paths."""
+    q = re.sub(r"[^a-z0-9]", "", query.lower())
+    dirs = [
+        Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs",
+        Path("C:/ProgramData/Microsoft/Windows/Start Menu/Programs"),
+    ]
+    best: tuple[int, str] | None = None
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        for lnk in d.rglob("*.lnk"):
+            stem = re.sub(r"[^a-z0-9]", "", lnk.stem.lower())
+            if q not in stem and stem not in q:
+                continue
+            target = _resolve_lnk(lnk)
+            if not target:
+                continue
+            if Path(target).name.lower() in _SKIP_EXE:
+                continue
+            score = 100 if stem == q else (80 if q in stem else 60)
+            if best is None or score > best[0]:
+                best = (score, target)
+                print(f"[open_app] Start Menu hit: {lnk.name} -> {target}")
+    return best[1] if best else None
+
+
 def _normalize(raw: str) -> str:
     key = raw.lower().strip()
-
     if key in _APP_ALIASES:
         return _APP_ALIASES[key].get(_SYSTEM, raw)
-
     for alias_key, os_map in _APP_ALIASES.items():
         if alias_key in key or key in alias_key:
             return os_map.get(_SYSTEM, raw)
+    return raw
 
-    return raw  
+
+def _launch_exe(path: str, cwd: str | None = None) -> bool:
+    try:
+        subprocess.Popen(
+            path, cwd=cwd or str(Path(path).parent),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        time.sleep(1.5)
+        return True
+    except Exception as e:
+        print(f"[open_app] launch_exe failed: {e}")
+        return False
+
 
 def _launch_windows(app_name: str) -> bool:
 
-    if shutil.which(app_name) or shutil.which(app_name.split(".")[0]):
-        try:
-            subprocess.Popen(
-                app_name,
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            time.sleep(1.5)
+    # 1. Direct PATH hit
+    found = shutil.which(app_name) or shutil.which(app_name.split(".")[0])
+    if found:
+        if _launch_exe(found):
             return True
-        except Exception as e:
-            print(f"[open_app] subprocess failed: {e}")
 
+    # 2. Windows Registry — App Paths (most apps register here on install)
+    reg_path = _search_registry(app_name)
+    if reg_path and _launch_exe(reg_path):
+        return True
+
+    # 3. Start Menu .lnk shortcuts
+    lnk_target = _search_start_menu(app_name)
+    if lnk_target and _launch_exe(lnk_target):
+        return True
+
+    # 4. Steam / Epic library scan
+    game_result = _find_game_exe(app_name)
+    if game_result:
+        game_exe, appid = game_result
+        # Prefer Steam -applaunch (handles DRM, runs as if launched from Steam)
+        if appid:
+            steam_exe = _find_steam_exe()
+            if steam_exe:
+                print(f"[open_app] Steam launch: appid={appid}")
+                try:
+                    subprocess.Popen(
+                        [str(steam_exe), "-applaunch", appid],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    time.sleep(2.0)
+                    return True
+                except Exception as e:
+                    print(f"[open_app] steam -applaunch failed: {e}")
+        # Fallback: direct exe
+        if _launch_exe(str(game_exe), str(game_exe.parent)):
+            return True
+
+    # 5. ms-settings: and other URI schemes
     if ":" in app_name:
         try:
-            subprocess.Popen(f"start {app_name}", shell=True)
+            subprocess.Popen(f'start "" "{app_name}"', shell=True,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
             time.sleep(1.0)
             return True
         except Exception:
             pass
 
+    # 6. Last resort: Start Menu GUI search via pyautogui
     try:
         import pyautogui
-        pyautogui.PAUSE = 0.1
+        pyautogui.PAUSE = 0.05
         pyautogui.press("win")
-        time.sleep(0.7)
-        pyautogui.write(app_name, interval=0.05)
-        time.sleep(0.9)
+        time.sleep(1.0)
+        pyautogui.write(app_name, interval=0.04)
+        time.sleep(1.5)
         pyautogui.press("enter")
-        time.sleep(2.5)
+        time.sleep(2.0)
         return True
     except Exception as e:
-        print(f"[open_app] Start Menu search failed: {e}")
+        print(f"[open_app] pyautogui fallback failed: {e}")
 
     return False
 

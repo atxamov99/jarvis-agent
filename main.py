@@ -1,3 +1,7 @@
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 import asyncio
 import re
 import threading
@@ -6,6 +10,15 @@ import sys
 import traceback
 from pathlib import Path
 
+# Fix Windows terminal encoding so emojis/Cyrillic don't crash
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+import numpy as np
 import sounddevice as sd
 from google import genai
 from google.genai import types
@@ -57,6 +70,12 @@ SEND_SAMPLE_RATE    = 16000
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE          = 1024
 
+# Noise gate — filters background noise, knocks, brief transients
+# Each frame = CHUNK_SIZE/SEND_SAMPLE_RATE = ~64 ms
+_GATE_OPEN_RMS    = 80     # RMS level required to consider audio "active"
+_GATE_ATTACK      = 2      # frames (~128 ms) above threshold before gate opens
+_GATE_HOLD        = 28     # frames (~1.8 s) gate stays open after level drops
+
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)["gemini_api_key"]
@@ -74,10 +93,38 @@ def _load_system_prompt() -> str:
 
 _CTRL_RE = re.compile(r"<ctrl\d+>", re.IGNORECASE)
 
-def _clean_transcript(text: str) -> str:    
+def _clean_transcript(text: str) -> str:
     text = _CTRL_RE.sub("", text)
     text = re.sub(r"[\x00-\x08\x0b-\x1f]", "", text)
     return text.strip()
+
+
+def _ollama_query(args: dict) -> str:
+    """Run a prompt against local Ollama. Returns the response text."""
+    try:
+        import ollama as _ollama
+
+        prompt  = args.get("prompt", "")
+        model   = args.get("model", "").strip()
+        context = args.get("context", "").strip()
+
+        if not model:
+            try:
+                models = _ollama.list().get("models", [])
+                model = models[0]["name"] if models else "llama3"
+            except Exception:
+                model = "llama3"
+
+        full_prompt = f"{context}\n\n{prompt}".strip() if context else prompt
+
+        print(f"[Ollama] model={model}  prompt={full_prompt[:80]}")
+        resp = _ollama.generate(model=model, prompt=full_prompt, stream=False)
+        answer = resp.get("response", "").strip()
+        print(f"[Ollama] → {answer[:120]}")
+        return answer or "Ollama returned an empty response."
+
+    except Exception as e:
+        return f"Ollama unavailable: {e}. Make sure 'ollama serve' is running."
 
 TOOL_DECLARATIONS = [
     {
@@ -110,7 +157,7 @@ TOOL_DECLARATIONS = [
             "technical/programming questions, product comparisons, or ANY 'who/what/when/where/why/how' question. "
             "NEVER say 'I don't know' or 'I can't access the internet' — call this tool instead. "
             "When the user asks something factual that you don't have memorized, call web_search immediately. "
-            "After getting results, summarize them BRIEFLY in Uzbek (2-4 sentences)."
+            "After getting results, summarize them BRIEFLY in the SAME language the user spoke (2-4 sentences)."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -483,7 +530,7 @@ TOOL_DECLARATIONS = [
             "When the user gives an EXPLICIT save command, confirm BRIEFLY in Uzbek (e.g. 'Eslab qoldim.') after calling the tool. "
             "When called silently (no explicit request), do NOT announce. "
             "Do NOT call for: weather, reminders, searches, or one-time commands. "
-            "Values must be in English regardless of the conversation language."
+            "Values should be concise and clear — any language is fine."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -551,6 +598,46 @@ TOOL_DECLARATIONS = [
             "required": ["scope"]
         }
     },
+    {
+        "name": "ollama_query",
+        "description": (
+            "Run a query on the local Ollama AI model running on this machine. "
+            "Use when: user says 'think locally', 'use local AI', 'ask ollama', 'offline mode', "
+            "or when internet is unavailable. Fast, private, no cloud. "
+            "Returns the model's response as text — speak it back."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "prompt":   {"type": "STRING", "description": "The question or task for Ollama"},
+                "model":    {"type": "STRING", "description": "Model name e.g. llama3, mistral, phi3. Leave empty to auto-select."},
+                "context":  {"type": "STRING", "description": "Optional extra context to prepend"},
+            },
+            "required": ["prompt"]
+        }
+    },
+    {
+        "name": "toggle_mute",
+        "description": (
+            "Mute or unmute the microphone. "
+            "TRIGGER when user says: 'молчать', 'замолчи', 'тихо', 'выключи микрофон', "
+            "'mute', 'shut up', 'be quiet', 'silence', 'unmute', 'включи микрофон', "
+            "'speak', 'говори'. "
+            "Use action='mute' to mute, action='unmute' to unmute. "
+            "After muting say a short goodbye (1 sentence max). "
+            "After unmuting say a short hello."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "mute | unmute"
+                }
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -565,6 +652,11 @@ class JarvisLive:
         self._speaking_lock = threading.Lock()
         self.ui.on_text_command = self._on_text_command
         self._turn_done_event: asyncio.Event | None = None
+
+        # Noise gate state (per-frame counters, safe inside GIL)
+        self._gate_open         = False
+        self._gate_attack_count = 0
+        self._gate_hold_count   = 0
 
         # Wake-word detector ("hey jarvis"). Starts muted; unmutes on wake.
         self._wake_detector = None
@@ -631,7 +723,7 @@ class JarvisLive:
     def speak_error(self, tool_name: str, error: str):
         short = str(error)[:120]
         self.ui.write_log(f"ERR: {tool_name} — {short}")
-        self.speak(f"Sir, {tool_name} encountered an error. {short}")
+        self.speak(f"Tool '{tool_name}' failed: {short}. What should I do next?")
 
     def _build_config(self) -> types.LiveConnectConfig:
         from datetime import datetime
@@ -806,12 +898,39 @@ class JarvisLive:
                 r = await loop.run_in_executor(None, lambda: flight_finder(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "ollama_query":
+                result = await loop.run_in_executor(None, lambda: _ollama_query(args))
+
+            elif name == "toggle_mute":
+                action = args.get("action", "mute").lower()
+                if action == "mute":
+                    self.ui.muted = True
+                    result = "Microphone muted."
+                else:
+                    self.ui.muted = False
+                    result = "Microphone active."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
-                self.speak("Goodbye, sir.")
+                self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
                 def _shutdown():
-                    import time, os
-                    time.sleep(1)
+                    # Wait for speech to start, then wait for it to finish
+                    deadline = time.time() + 12
+                    while time.time() < deadline:
+                        with self._speaking_lock:
+                            speaking = self._is_speaking
+                        if speaking:
+                            break
+                        time.sleep(0.05)
+                    # Now wait for it to finish
+                    deadline = time.time() + 15
+                    while time.time() < deadline:
+                        with self._speaking_lock:
+                            speaking = self._is_speaking
+                        if not speaking:
+                            break
+                        time.sleep(0.05)
+                    time.sleep(1.5)
                     os._exit(0)
                 threading.Thread(target=_shutdown, daemon=True).start()
 
@@ -853,11 +972,27 @@ class JarvisLive:
                     print(f"[WakeWord] feed error: {e}")
 
             if not jarvis_speaking and not self.ui.muted:
-                data = indata.tobytes()
-                loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
-                )
+                # Noise gate: reject background noise and brief transients
+                arr = np.frombuffer(indata, dtype=np.int16)
+                rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
+
+                if rms >= _GATE_OPEN_RMS:
+                    self._gate_attack_count += 1
+                    if self._gate_attack_count >= _GATE_ATTACK:
+                        self._gate_open = True
+                    self._gate_hold_count = _GATE_HOLD
+                else:
+                    self._gate_attack_count = 0
+                    if self._gate_hold_count > 0:
+                        self._gate_hold_count -= 1
+                    else:
+                        self._gate_open = False
+
+                if self._gate_open:
+                    loop.call_soon_threadsafe(
+                        self.out_queue.put_nowait,
+                        {"data": indata.tobytes(), "mime_type": "audio/pcm"}
+                    )
 
         try:
             with sd.InputStream(
@@ -990,6 +1125,7 @@ class JarvisLive:
                     print("[JARVIS] ✅ Connected.")
                     self.ui.set_state("LISTENING")
                     self.ui.write_log("SYS: JARVIS online.")
+                    self.speak("JARVIS systems online. Ready.")
 
                     tg.create_task(self._send_realtime())
                     tg.create_task(self._listen_audio())
@@ -1004,7 +1140,30 @@ class JarvisLive:
             print("[JARVIS] 🔄 Reconnecting in 3s...")
             await asyncio.sleep(3)
 
+def _ensure_single_instance() -> bool:
+    """Return True if we are the first instance. Focus existing window and return False otherwise."""
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, True, "JarvisAgentSingleInstance")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        # Another instance is running — bring its window to front
+        try:
+            hwnd = ctypes.windll.user32.FindWindowW(None, "J.A.R.V.I.S — MARK XXXIX")
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+        return False
+    return True
+
+
 def main():
+    if not _ensure_single_instance():
+        print("[JARVIS] Already running — focused existing window.")
+        return
+
     ui = JarvisUI("face.png")
 
     def runner():
