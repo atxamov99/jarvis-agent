@@ -480,6 +480,46 @@ def organize_desktop() -> str:
         return f"Could not organize desktop: {e}"
 
 
+def open_path(path: str, name: str = "") -> str:
+    """Open a file or folder in the default OS handler (file manager / app).
+
+    Works for paths like:
+      open_path("desktop", "Mark-XXXIX")           → opens that folder in file manager
+      open_path("/home/user/notes.txt")            → opens in default editor
+      open_path("downloads")                       → opens Downloads in file manager
+    """
+    import subprocess
+    try:
+        base   = _resolve_path(path)
+        target = (base / name) if name else base
+        if not target.exists():
+            # Try treating `path` as a folder name under Desktop as a fallback
+            desktop_try = _get_desktop() / (name or path)
+            if desktop_try.exists():
+                target = desktop_try
+            else:
+                return f"Not found: {target}"
+        if not _is_safe_path(target):
+            return f"Access denied: {target}"
+
+        if _OS == "Linux":
+            subprocess.Popen(
+                ["xdg-open", str(target)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        elif _OS == "Darwin":
+            subprocess.Popen(["open", str(target)])
+        else:  # Windows
+            os.startfile(str(target))  # type: ignore[attr-defined]
+
+        kind = "folder" if target.is_dir() else "file"
+        return f"Opened {kind}: {target.name}"
+    except Exception as e:
+        return f"Could not open: {e}"
+
+
 def get_file_info(path: str, name: str = "") -> str:
     try:
         base   = _resolve_path(path)
@@ -598,6 +638,13 @@ def file_controller(
 
         elif action == "info":
             return get_file_info(path, name=name)
+
+        elif action in ("open", "reveal", "show"):
+            names = _split_targets(name) if name else []
+            if len(names) > 1:
+                results = [open_path(path, name=n) for n in names]
+                return "\n".join(results)
+            return open_path(path, name=name)
 
         else:
             return f"Unknown action: '{action}'"

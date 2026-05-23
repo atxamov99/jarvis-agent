@@ -595,6 +595,56 @@ def _split_app_names(raw: str) -> list[str]:
     return [p.strip() for p in parts if p and p.strip()]
 
 
+def _try_open_as_path(name: str) -> bool:
+    """If `name` looks like (or resolves to) a file/folder on the user's machine,
+    open it with the OS default handler. Returns True on success."""
+    import subprocess
+    candidates: list[Path] = []
+    raw = Path(name).expanduser()
+    if raw.exists():
+        candidates.append(raw)
+
+    # Probe common user dirs for a matching child
+    home = Path.home()
+    search_roots = [
+        home / "Рабочий стол",  # Russian locale Desktop
+        home / "Desktop",
+        home / "Загрузки",
+        home / "Downloads",
+        home / "Документы",
+        home / "Documents",
+        home,
+    ]
+    for root in search_roots:
+        if not root.exists():
+            continue
+        candidate = root / name
+        if candidate.exists():
+            candidates.append(candidate)
+            break
+
+    if not candidates:
+        return False
+
+    target = candidates[0]
+    try:
+        if _SYSTEM == "Linux":
+            subprocess.Popen(
+                ["xdg-open", str(target)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        elif _SYSTEM == "Darwin":
+            subprocess.Popen(["open", str(target)])
+        else:
+            import os as _os
+            _os.startfile(str(target))  # type: ignore[attr-defined]
+        return True
+    except Exception as e:
+        print(f"[open_app] path-open failed: {e}")
+        return False
+
+
 def _launch_one(app_name: str) -> str:
     launcher   = _OS_LAUNCHERS.get(_SYSTEM)
     normalized = _normalize(app_name)
@@ -604,6 +654,10 @@ def _launch_one(app_name: str) -> str:
             return f"Opened {app_name}."
         if normalized.lower() != app_name.lower() and launcher(app_name):
             return f"Opened {app_name}."
+        # Last-resort fallback: maybe the user meant a folder/file (e.g. a project
+        # directory on the Desktop) — open it in the file manager / default app.
+        if _try_open_as_path(app_name):
+            return f"Opened {app_name} (file/folder)."
         return (
             f"Could not confirm that {app_name} launched. "
             f"It may still be loading, or it might not be installed."

@@ -321,7 +321,7 @@ TOOL_DECLARATIONS = [
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action":      {"type": "STRING", "description": "list | create_file | create_folder | delete | move | copy | rename | read | write | find | largest | disk_usage | organize_desktop | info"},
+                "action":      {"type": "STRING", "description": "list | open | create_file | create_folder | delete | move | copy | rename | read | write | find | largest | disk_usage | organize_desktop | info"},
                 "path":        {"type": "STRING", "description": "File/folder path or shortcut: desktop, downloads, documents, home, pictures, music, videos. For delete/move/copy: parent directory of the items."},
                 "destination": {"type": "STRING", "description": "Destination path for move/copy"},
                 "new_name":    {"type": "STRING", "description": "New name for rename"},
@@ -351,13 +351,19 @@ TOOL_DECLARATIONS = [
     {
         "name": "code_helper",
         "description": (
-            "Writes, edits, explains, runs, or builds code files in any modern language. "
-            "Supported languages include: Python, JavaScript, TypeScript, React (JSX/TSX), Vue, Svelte, "
-            "HTML, CSS/SCSS, Java, C/C++, Go, Rust, Ruby, PHP, Bash, SQL, JSON. "
-            "When the user says 'reactda kod yoz', 'manga React komponenti yoz', 'bitta funksiyali kod yoz', "
-            "'html sahifa yarat', 'css yoz', 'javascript funksiya yoz' etc. — call this tool with "
-            "action='write' and the appropriate language. Default language is python. "
-            "Output is saved to the user's Desktop unless output_path is provided."
+            "Writes, edits, explains, runs, or builds code files in ANY modern programming language — "
+            "Python, JavaScript, TypeScript, React (JSX/TSX), Vue, Svelte, HTML, CSS/SCSS, Java, C/C++, "
+            "Go, Rust, Ruby, PHP, Bash, SQL, JSON, and more. "
+            "THIS IS THE TOOL THE USER WANTS WHEN THEY ASK FOR ANY CODE. "
+            "Always available — never claim code writing is unavailable. "
+            "TRIGGER (call IMMEDIATELY with action='write'): "
+            "'kod yoz', 'skript yoz', 'funksiya yoz', 'komponent yoz', 'reactda kod yoz', "
+            "'html sahifa yarat', 'css yoz', 'javascript funksiya', 'python skript', "
+            "'bitta funksiyali kod yozib ber', 'manga shunday narsa qilib ber', "
+            "'write code', 'create a function', 'build me a component', and any similar phrasing. "
+            "Pass the user's request verbatim as `description`. If a specific language is mentioned, "
+            "set `language` accordingly; otherwise default to python or infer from context. "
+            "Output is auto-saved to the user's Desktop unless output_path is provided."
         ),
         "parameters": {
             "type": "OBJECT",

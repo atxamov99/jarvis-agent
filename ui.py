@@ -992,9 +992,12 @@ class MainWindow(QMainWindow):
     def __init__(self, face_path: str):
         super().__init__()
         from PyQt6.QtGui import QIcon
-        self.setWindowIcon(QIcon(face_path))
+        self._app_icon = QIcon(face_path)
+        self.setWindowIcon(self._app_icon)
         self.setWindowTitle("J.A.R.V.I.S — MARK XXXIX")
         self.setMinimumSize(_MIN_W, _MIN_H)
+        self._real_quit_requested = False
+        self._tray = None
 
         # Restore saved geometry or center on screen
         self._geometry_key = "window_geometry"
@@ -1073,8 +1076,10 @@ class MainWindow(QMainWindow):
         sc_mute.activated.connect(self._toggle_mute)
         sc_full = QShortcut(QKeySequence("F11"), self)
         sc_full.activated.connect(self._toggle_fullscreen)
+        sc_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
+        sc_quit.activated.connect(self._real_quit)
 
-    def closeEvent(self, event):
+    def _save_geometry(self) -> None:
         try:
             import base64
             geo_b64 = base64.b64encode(bytes(self.saveGeometry())).decode()
@@ -1085,6 +1090,91 @@ class MainWindow(QMainWindow):
             API_FILE.write_text(json.dumps(cfg, indent=4), encoding="utf-8")
         except Exception:
             pass
+
+    def _ensure_tray(self) -> bool:
+        """Lazily create a system tray icon. Returns True if a tray is available."""
+        if self._tray is not None:
+            return True
+        try:
+            from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
+            from PyQt6.QtGui import QAction
+            if not QSystemTrayIcon.isSystemTrayAvailable():
+                return False
+            tray = QSystemTrayIcon(self._app_icon, self)
+            tray.setToolTip("J.A.R.V.I.S — running in background")
+
+            menu = QMenu()
+            act_show = QAction("Show JARVIS", self)
+            act_show.triggered.connect(self._restore_from_tray)
+            menu.addAction(act_show)
+
+            act_mute = QAction("Toggle mic mute (F4)", self)
+            act_mute.triggered.connect(self._toggle_mute)
+            menu.addAction(act_mute)
+
+            menu.addSeparator()
+
+            act_quit = QAction("Quit JARVIS", self)
+            act_quit.triggered.connect(self._real_quit)
+            menu.addAction(act_quit)
+
+            tray.setContextMenu(menu)
+            tray.activated.connect(self._on_tray_activated)
+            tray.show()
+            self._tray = tray
+            return True
+        except Exception as e:
+            print(f"[UI] System tray init failed: {e}")
+            return False
+
+    def _on_tray_activated(self, reason):
+        try:
+            from PyQt6.QtWidgets import QSystemTrayIcon
+            if reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                          QSystemTrayIcon.ActivationReason.DoubleClick):
+                self._restore_from_tray()
+        except Exception:
+            self._restore_from_tray()
+
+    def _restore_from_tray(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _real_quit(self):
+        """Actually exit the whole Jarvis process (used by tray menu / shutdown tool)."""
+        self._real_quit_requested = True
+        self._save_geometry()
+        if self._tray is not None:
+            self._tray.hide()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.instance().quit()
+
+    def closeEvent(self, event):
+        self._save_geometry()
+
+        # If the actual shutdown path was taken (tray menu, shutdown_jarvis tool,
+        # Ctrl+Q, etc.), let Qt close normally.
+        if self._real_quit_requested:
+            super().closeEvent(event)
+            return
+
+        # Otherwise: pressing the X button hides to tray and keeps Jarvis listening.
+        if self._ensure_tray():
+            event.ignore()
+            self.hide()
+            try:
+                self._tray.showMessage(
+                    "J.A.R.V.I.S",
+                    "Fonda ishlayapti. Mikrofon va wake-word faol. Tray icon orqali qayta oching.",
+                    self._app_icon,
+                    4000,
+                )
+            except Exception:
+                pass
+            return
+
+        # No tray available (rare) — fall back to default close
         super().closeEvent(event)
 
     def _toggle_fullscreen(self):
@@ -1498,6 +1588,9 @@ class JarvisUI:
     def __init__(self, face_path: str, size=None):
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
+        # Window close hides to tray; don't quit the app when the last visible
+        # window is closed — Jarvis must keep listening in the background.
+        self._app.setQuitOnLastWindowClosed(False)
         self._win = MainWindow(face_path)
         self._win.show()
         self.root = _RootShim(self._app)
