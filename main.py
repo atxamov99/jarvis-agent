@@ -773,24 +773,73 @@ class JarvisLive:
 
     def _on_wake_word(self):
         """Called by WakeWordDetector when 'hey jarvis' is heard.
-        Unmutes regardless of how the mute was set (UI button, voice
-        command, auto-sleep)."""
-        was_muted = self.ui.muted
+        Three cases:
+          1. Muted     → unmute and start listening.
+          2. Speaking  → BARGE-IN: stop Jarvis mid-sentence, drain audio queue,
+                         start listening to the user immediately.
+          3. Already listening → just acknowledge.
+        """
+        was_muted    = self.ui.muted
+        with self._speaking_lock:
+            was_speaking = self._is_speaking
+
+        # Cancel any pending auto-sleep timer in every case
+        if hasattr(self, "_sleep_timer") and self._sleep_timer:
+            try:
+                self._sleep_timer.cancel()
+            except Exception:
+                pass
+            self._sleep_timer = None
+
+        if was_speaking:
+            # BARGE-IN: interrupt Jarvis's current speech.
+            print("[JARVIS] 🛑 Wake-word during speech — BARGE-IN")
+            self.ui.write_log("🛑 'Hey Jarvis' — to'xtatdim, eshityapman")
+            # Drain the playback queue so audio cuts off ASAP
+            if self.audio_in_queue is not None:
+                try:
+                    while not self.audio_in_queue.empty():
+                        self.audio_in_queue.get_nowait()
+                except Exception:
+                    pass
+            # Signal that we're no longer speaking — listening resumes
+            with self._speaking_lock:
+                self._is_speaking = False
+            if not self.ui.muted:
+                self.ui.set_state("LISTENING")
+            # Tell Gemini Live the user is taking the turn — best-effort
+            if self.session and self._loop:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self._send_user_interrupt(),
+                        self._loop,
+                    )
+                except Exception as e:
+                    print(f"[JARVIS] interrupt-send failed: {e}")
+            return
+
         if was_muted:
             self.ui.muted = False
             self.ui.write_log("🟢 'Hey Jarvis' — uyg'ondim, eshityapman")
             print("[JARVIS] 🟢 Wake-word triggered — unmuted")
-            # Cancel any pending auto-sleep timer so we don't snap back to mute
-            if hasattr(self, "_sleep_timer") and self._sleep_timer:
-                try:
-                    self._sleep_timer.cancel()
-                except Exception:
-                    pass
-                self._sleep_timer = None
-        else:
-            # Already listening — just acknowledge so the user knows it was heard
-            self.ui.write_log("🟢 'Hey Jarvis' — allaqachon tinglayman")
-            print("[JARVIS] 🟢 Wake-word fired (already unmuted)")
+            return
+
+        # Already listening — just acknowledge so the user knows it was heard
+        self.ui.write_log("🟢 'Hey Jarvis' — allaqachon tinglayman")
+        print("[JARVIS] 🟢 Wake-word fired (already unmuted)")
+
+    async def _send_user_interrupt(self):
+        """Send an empty client-content turn so Gemini Live closes its current
+        generation and waits for the next user input."""
+        if not self.session:
+            return
+        try:
+            await self.session.send_client_content(
+                turns={"parts": [{"text": ""}]},
+                turn_complete=False,
+            )
+        except Exception as e:
+            print(f"[JARVIS] interrupt msg failed: {e}")
 
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
@@ -1100,11 +1149,12 @@ class JarvisLive:
             with self._speaking_lock:
                 jarvis_speaking = self._is_speaking
 
-            # Feed wake-word detector whenever muted — even while Jarvis is briefly
-            # speaking ("microphone muted, sir"), so the user can interrupt and
-            # re-wake with "hey jarvis". The detector has its own cooldown so it
-            # won't false-trigger on Jarvis's own voice.
-            if self._wake_detector and self.ui.muted:
+            # Feed wake-word detector whenever:
+            #   • Jarvis is muted (so 'Hey Jarvis' wakes it up), OR
+            #   • Jarvis is speaking (so 'Hey Jarvis' interrupts / barges in).
+            # The detector's 2s cooldown + 0.42 threshold + Speex noise suppression
+            # keep false-triggers from Jarvis's own voice rare.
+            if self._wake_detector and (self.ui.muted or jarvis_speaking):
                 try:
                     self._wake_detector.feed(indata)
                 except Exception as e:

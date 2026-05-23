@@ -1153,16 +1153,25 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self._save_geometry()
 
-        # If the actual shutdown path was taken (tray menu, shutdown_jarvis tool,
-        # Ctrl+Q, etc.), let Qt close normally.
+        # If the user explicitly asked to quit (Ctrl+Q, tray menu, shutdown_jarvis
+        # voice command), let Qt close normally.
         if self._real_quit_requested:
             super().closeEvent(event)
             return
 
-        # Otherwise: pressing the X button hides to tray and keeps Jarvis listening.
-        if self._ensure_tray():
-            event.ignore()
-            self.hide()
+        # X button → ALWAYS hide instead of close, regardless of whether a system
+        # tray is available. On GNOME/Wayland tray is often missing; if we let the
+        # window actually close, the daemon thread running the asyncio audio loop
+        # gets killed and Jarvis stops working.
+        event.ignore()
+        self.hide()
+        print("[JARVIS] 🪟 Window hidden — Jarvis continues running in background")
+        print("[JARVIS] 💡 Press Ctrl+Q in the (hidden) app, say 'shutdown jarvis',")
+        print("[JARVIS]    or kill the python process to actually exit.")
+
+        # Try to create a tray icon so the user can restore the window.
+        tray_ok = self._ensure_tray()
+        if tray_ok:
             try:
                 self._tray.showMessage(
                     "J.A.R.V.I.S",
@@ -1172,10 +1181,34 @@ class MainWindow(QMainWindow):
                 )
             except Exception:
                 pass
-            return
+        else:
+            # No tray — fall back to a desktop notification so the user knows
+            # the app is still alive.
+            self._desktop_notify(
+                "JARVIS fonda ishlayapti",
+                "Mikrofon va wake-word faol. 'Hey Jarvis' deb chaqiring."
+            )
 
-        # No tray available (rare) — fall back to default close
-        super().closeEvent(event)
+    def _desktop_notify(self, title: str, body: str) -> None:
+        """Send a desktop notification via notify-send (Linux) / osascript (macOS)
+        when a system tray icon isn't available."""
+        import subprocess
+        import platform
+        try:
+            sys_name = platform.system()
+            if sys_name == "Linux":
+                if subprocess.run(["which", "notify-send"], capture_output=True).returncode == 0:
+                    subprocess.Popen(
+                        ["notify-send", "-a", "JARVIS", title, body],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+            elif sys_name == "Darwin":
+                subprocess.Popen(
+                    ["osascript", "-e", f'display notification "{body}" with title "{title}"'],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+        except Exception:
+            pass
 
     def _toggle_fullscreen(self):
         if self.isFullScreen():
