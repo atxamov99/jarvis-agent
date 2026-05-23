@@ -24,9 +24,9 @@ class WakeWordDetector:
     def __init__(
         self,
         on_wake,
-        threshold: float    = 0.5,
+        threshold: float    = 0.42,  # was 0.5 — more sensitive to quiet "hey jarvis"
         cooldown_s: float   = 2.0,
-        energy_floor: int   = 250,   # skip inference when RMS below this
+        energy_floor: int   = 80,    # was 250 — matches noise gate, catches softer speech
     ):
         import openwakeword
         from openwakeword.model import Model

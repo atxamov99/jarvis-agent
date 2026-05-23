@@ -772,11 +772,25 @@ class JarvisLive:
                 self._wake_detector = None
 
     def _on_wake_word(self):
-        """Called by WakeWordDetector when 'hey jarvis' is heard."""
-        if self.ui.muted:
+        """Called by WakeWordDetector when 'hey jarvis' is heard.
+        Unmutes regardless of how the mute was set (UI button, voice
+        command, auto-sleep)."""
+        was_muted = self.ui.muted
+        if was_muted:
             self.ui.muted = False
-            self.ui.write_log("🟢 Wake-word detected — listening")
+            self.ui.write_log("🟢 'Hey Jarvis' — uyg'ondim, eshityapman")
             print("[JARVIS] 🟢 Wake-word triggered — unmuted")
+            # Cancel any pending auto-sleep timer so we don't snap back to mute
+            if hasattr(self, "_sleep_timer") and self._sleep_timer:
+                try:
+                    self._sleep_timer.cancel()
+                except Exception:
+                    pass
+                self._sleep_timer = None
+        else:
+            # Already listening — just acknowledge so the user knows it was heard
+            self.ui.write_log("🟢 'Hey Jarvis' — allaqachon tinglayman")
+            print("[JARVIS] 🟢 Wake-word fired (already unmuted)")
 
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
@@ -1007,7 +1021,15 @@ class JarvisLive:
                 action = args.get("action", "mute").lower()
                 if action == "mute":
                     self.ui.muted = True
-                    result = "Microphone muted."
+                    # Make sure wake-word detector is awake so user can
+                    # re-wake with "hey jarvis" — pause() would have
+                    # silenced it forever.
+                    if self._wake_detector:
+                        try:
+                            self._wake_detector.resume()
+                        except Exception:
+                            pass
+                    result = "Microphone muted — say 'hey jarvis' to wake me back up."
                 else:
                     self.ui.muted = False
                     result = "Microphone active."
@@ -1078,8 +1100,11 @@ class JarvisLive:
             with self._speaking_lock:
                 jarvis_speaking = self._is_speaking
 
-            # Feed wake-word detector while muted (skip while Jarvis is speaking)
-            if self._wake_detector and self.ui.muted and not jarvis_speaking:
+            # Feed wake-word detector whenever muted — even while Jarvis is briefly
+            # speaking ("microphone muted, sir"), so the user can interrupt and
+            # re-wake with "hey jarvis". The detector has its own cooldown so it
+            # won't false-trigger on Jarvis's own voice.
+            if self._wake_detector and self.ui.muted:
                 try:
                     self._wake_detector.feed(indata)
                 except Exception as e:
