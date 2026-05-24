@@ -61,6 +61,7 @@ from actions.notifier          import notifier as notifier_action
 from actions.password_gen      import password_gen as password_gen_action
 from actions.archiver          import archiver as archiver_action
 from actions.speedtest         import speedtest as speedtest_action
+from actions.wifi_control      import wifi_control as wifi_control_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -958,6 +959,26 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "wifi_control",
+        "description": (
+            "List WiFi networks, connect/disconnect, turn WiFi on/off, check status. "
+            "Trigger: 'WiFi tarmoqlarini ko'rsat', 'X tarmog'iga ul', "
+            "'WiFi o'chir', 'qaysi WiFiga ulangan'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":   {"type": "STRING",
+                             "description": "status | list | connect | disconnect | on | off"},
+                "ssid":     {"type": "STRING",
+                             "description": "Network name to connect to"},
+                "password": {"type": "STRING",
+                             "description": "WiFi password (if needed for connection)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "speedtest",
         "description": (
             "Measure internet speed: download, upload, ping. "
@@ -1408,6 +1429,11 @@ class JarvisLive:
             elif name == "speedtest":
                 r = await loop.run_in_executor(
                     None, lambda: speedtest_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "wifi_control":
+                r = await loop.run_in_executor(
+                    None, lambda: wifi_control_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -1895,6 +1921,8 @@ class JarvisOpenAI:
                 return archiver_action(parameters=args, player=self.ui) or "Done."
             if name == "speedtest":
                 return speedtest_action(parameters=args, player=self.ui) or "Done."
+            if name == "wifi_control":
+                return wifi_control_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
