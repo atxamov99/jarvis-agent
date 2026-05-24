@@ -51,6 +51,10 @@ from actions.translate         import translate as translate_action
 from actions.clipboard         import clipboard as clipboard_action
 from actions.system_info       import system_info as system_info_action
 from actions.close_apps        import close_apps as close_apps_action
+from actions.terminal_control  import terminal_control
+from actions.music_control     import music_control
+from actions.gaming_control    import gaming_control
+from actions.clap_detector     import ClapDetector
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -809,6 +813,65 @@ TOOL_DECLARATIONS = [
             "required": ["app_name"]
         }
     },
+    {
+        "name": "terminal_control",
+        "description": (
+            "Run shell commands, terminal operations, git commands on the computer. "
+            "Use for: running scripts, git commit/push/pull/status/log, listing files, "
+            "checking processes, executing any shell command the user asks."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "run | git_status | git_commit | git_push | git_pull | git_log | list_dir | processes"
+                },
+                "command": {"type": "STRING", "description": "Shell command to run (for action=run)"},
+                "path":    {"type": "STRING", "description": "Working directory path (optional)"},
+                "message": {"type": "STRING", "description": "Git commit message (for git_commit)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "music_control",
+        "description": (
+            "Control music and media playback. Works with Spotify, VLC, YouTube in browser, "
+            "and any media player. Use for: play/pause, next/previous track, volume, "
+            "check what's playing, open Spotify."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "play | pause | play_pause | next | previous | stop | volume | status | current_track | list_players | open_spotify"
+                },
+                "volume": {"type": "INTEGER", "description": "Volume level 0-100 (for action=volume)"},
+                "player": {"type": "STRING", "description": "Specific player name (optional, auto-detects)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "gaming_control",
+        "description": (
+            "Gaming features: launch games by name, check what games are running, "
+            "close games, activate gaming mode (performance), get CPU/GPU stats, open Steam."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "launch | what_is_running | kill_game | system_for_gaming | fps_info | open_steam"
+                },
+                "game": {"type": "STRING", "description": "Game name (e.g. 'Minecraft', 'CS2', 'Steam')"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -1165,6 +1228,18 @@ class JarvisLive:
 
             elif name == "close_apps":
                 r = await loop.run_in_executor(None, lambda: close_apps_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "terminal_control":
+                r = await loop.run_in_executor(None, lambda: terminal_control(**args))
+                result = r or "Done."
+
+            elif name == "music_control":
+                r = await loop.run_in_executor(None, lambda: music_control(**args))
+                result = r or "Done."
+
+            elif name == "gaming_control":
+                r = await loop.run_in_executor(None, lambda: gaming_control(**args))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -1610,6 +1685,12 @@ class JarvisOpenAI:
                 return system_info_action(parameters=args, player=self.ui) or "Done."
             if name == "close_apps":
                 return close_apps_action(parameters=args, player=self.ui) or "Done."
+            if name == "terminal_control":
+                return terminal_control(**args) or "Done."
+            if name == "music_control":
+                return music_control(**args) or "Done."
+            if name == "gaming_control":
+                return gaming_control(**args) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
@@ -1845,6 +1926,28 @@ def main():
         return
 
     ui = JarvisUI("face.png")
+
+    def _on_double_clap():
+        """Toggle JARVIS mute on double clap."""
+        ui.muted = not ui.muted
+        state = "MUTED" if ui.muted else "LISTENING"
+        try:
+            ui.set_state(state)
+        except Exception:
+            pass
+        ui.write_log(f"SYS: Double clap — JARVIS {'muted' if ui.muted else 'active'}.")
+        print(f"[ClapDetector] 👏👏 Double clap → {'MUTED' if ui.muted else 'ACTIVE'}")
+
+    def _start_clap():
+        import time as _t
+        _t.sleep(3)
+        try:
+            detector = ClapDetector(_on_double_clap)
+            detector.start()
+        except Exception as e:
+            print(f"[ClapDetector] ⚠️ Failed to start: {e}")
+
+    threading.Thread(target=_start_clap, daemon=True).start()
 
     def runner():
         ui.wait_for_api_key()

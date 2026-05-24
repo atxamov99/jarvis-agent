@@ -131,6 +131,9 @@ file_controller → list/open/create/delete/move/copy files and folders. "Deskto
 close_apps → close one or more RUNNING apps by name (graceful close, not uninstall). Trigger: "Telegram'ni yop", "Chrome va Spotify'ni yop", "hammasini yop", "close X". MULTI-TARGET: pass a comma/va-separated list like "Telegram, Chrome, Spotify" in app_name — all matching processes are closed in one call. Use this for closing apps; do NOT confuse with file_controller delete which is for files.
 clipboard → read or write the system clipboard. Trigger: "clipboard'da nima bor", "shu matnni nusxa olib qoy", "paste qil".
 system_info → CPU, RAM, disk, battery, network, uptime stats. Trigger: "batareya qancha", "RAM holat", "disk to'lganmi", "tezligi qancha", "ish vaqti".
+terminal_control → run shell commands, git operations (status/commit/push/pull/log), list directories, check processes. Trigger: "git status qil", "shu commandni ishlat", "terminalda X bajar", "git push qil", "fayllarni ko'rsat".
+music_control → control music/media (Spotify, VLC, YouTube). Actions: play/pause, next/previous, volume, status, open Spotify. Trigger: "musiqa qoy", "to'xtat", "keyingisi", "ovoz balandlatib qoy", "Spotify och".
+gaming_control → game features: launch/close games, gaming mode (performance), CPU/GPU stats, open Steam. Trigger: "Minecraft ishga tushir", "qaysi o'yin ochiq", "gaming mode yoq", "Steam och".
 ollama_query → run query on local Ollama AI (fast, private, offline).
 screen_process → vision: analyze screen or camera, then stay silent.
 agent_task: ONLY for complex, multi-step planning (3+ tool chains) and call it if user really specifies it. Do not call agent_task while you can accomplish it with a single tool.
