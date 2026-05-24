@@ -167,6 +167,14 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+todo → structured task list with priority and deadline. Trigger:
+  "vazifa qo'sh: [nom]" → action="add", title="nom" (+ priority/deadline optional)
+  "yuqori ustuvorlikli bugungi vazifa: [nom]" → priority="high", deadline="bugun"
+  "vazifalarni ko'rsat" → action="list" (default: pending)
+  "bajarilgan vazifalar" → action="list", filter="done"
+  "[nom] vazifa bajarildi" → action="done", query="nom"
+  "bugungi va kechikkan vazifalar" → action="today"
+  NOTE: todo is for TASKS WITH DEADLINES. Use notes for free-form text.
 alarm → set timed alarms at specific clock time (once or recurring). Trigger:
   "soat 7:30 da uyg'ot" → action="set", time="07:30", label="Uyg'onish"
   "ertaga 9 da signal" → action="set", time="ertaga 09:00"

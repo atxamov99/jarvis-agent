@@ -77,6 +77,7 @@ from actions.macro_recorder    import macro_recorder as macro_action
 from actions.home_assistant    import home_assistant as ha_action
 from actions.system_monitor    import system_monitor as sysmon_action
 from actions.alarm             import alarm as alarm_action
+from actions.todo              import todo as todo_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -974,6 +975,32 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "todo",
+        "description": (
+            "Structured task list with priorities (high/medium/low) and deadlines. "
+            "Trigger: 'vazifa qo'sh', 'bugungi vazifalar', 'bajarildi', "
+            "'vazifalarni ko'rsat', 'kechikkan vazifalar'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":   {"type": "STRING",
+                             "description": "add | list | done | delete | search | today"},
+                "title":    {"type": "STRING",
+                             "description": "Task title (for add/done/delete)"},
+                "priority": {"type": "STRING",
+                             "description": "high | medium | low (default: medium)"},
+                "deadline": {"type": "STRING",
+                             "description": "Deadline: 'bugun', 'ertaga', '2025-06-01'"},
+                "filter":   {"type": "STRING",
+                             "description": "pending | done | all (for list, default: pending)"},
+                "query":    {"type": "STRING",
+                             "description": "Search keyword"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "alarm",
         "description": (
             "Set alarms at specific times (once or recurring daily). "
@@ -1850,6 +1877,11 @@ class JarvisLive:
                     None, lambda: alarm_action(parameters=args, player=self.ui, speak=self.speak))
                 result = r or "Done."
 
+            elif name == "todo":
+                r = await loop.run_in_executor(
+                    None, lambda: todo_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2368,6 +2400,8 @@ class JarvisOpenAI:
                 return sysmon_action(parameters=args, player=self.ui) or "Done."
             if name == "alarm":
                 return alarm_action(parameters=args, player=self.ui) or "Done."
+            if name == "todo":
+                return todo_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
