@@ -99,6 +99,14 @@ def _get_api_key() -> str:
         return json.load(f)["gemini_api_key"]
 
 
+def _get_openai_key() -> str | None:
+    try:
+        with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f).get("openai_api_key") or None
+    except Exception:
+        return None
+
+
 def _load_system_prompt() -> str:
     try:
         return PROMPT_PATH.read_text(encoding="utf-8")
@@ -115,6 +123,15 @@ def _clean_transcript(text: str) -> str:
     text = _CTRL_RE.sub("", text)
     text = re.sub(r"[\x00-\x08\x0b-\x1f]", "", text)
     return text.strip()
+
+def _merge_transcript_fragments(fragments: list[str]) -> str:
+    """Join streaming transcript fragments correctly.
+    Gemini Live sends cumulative partial transcripts (each fragment is a delta).
+    We concatenate without extra spaces, then normalize whitespace."""
+    merged = "".join(fragments)
+    # Collapse multiple spaces into one
+    merged = re.sub(r" {2,}", " ", merged).strip()
+    return merged
 
 
 def _ollama_query(args: dict) -> str:
@@ -1228,12 +1245,12 @@ class JarvisLive:
                             if self._turn_done_event:
                                 self._turn_done_event.set()
 
-                            full_in = " ".join(in_buf).strip()
+                            full_in = _merge_transcript_fragments(in_buf)
                             if full_in:
                                 self.ui.write_log(f"You: {full_in}")
                             in_buf = []
 
-                            full_out = " ".join(out_buf).strip()
+                            full_out = _merge_transcript_fragments(out_buf)
                             if full_out:
                                 self.ui.write_log(f"Jarvis: {full_out}")
                             out_buf = []

@@ -35,6 +35,28 @@ def _generate(prompt: str, model: str = GEMINI_MODEL) -> str:
     ).text
 
 
+def _generate_openai(prompt: str, model: str = "gpt-4o") -> str:
+    from actions.openai_client import get_client
+    client = get_client()
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+    )
+    return resp.choices[0].message.content or ""
+
+
+def _generate_with_fallback(prompt: str) -> str:
+    """Try Gemini first; fall back to GPT-4o on any error."""
+    try:
+        result = _generate(prompt)
+        if result and result.strip():
+            return result
+    except Exception as e:
+        print(f"[Code] ⚠️ Gemini failed ({e}), switching to GPT-4o...")
+    return _generate_openai(prompt)
+
+
 def _clean_code(text: str) -> str:
     text = text.strip()
     text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
@@ -285,7 +307,7 @@ Description: {description}
 
 Code:"""
 
-    code = _clean_code(_generate(prompt))
+    code = _clean_code(_generate_with_fallback(prompt))
     path = _resolve_save_path(output_path, lang)
     _save_file(path, code)
     return code, path
@@ -306,7 +328,7 @@ Broken code:
 
 Fixed code:"""
 
-    return _clean_code(_generate(prompt))
+    return _clean_code(_generate_with_fallback(prompt))
 
 
 def _run_file(path: Path, args: list, timeout: int) -> str:
@@ -436,7 +458,7 @@ Original code:
 Updated code:"""
 
     try:
-        edited = _clean_code(_generate(prompt))
+        edited = _clean_code(_generate_with_fallback(prompt))
     except Exception as e:
         return f"Could not edit code: {e}"
 
@@ -466,7 +488,7 @@ Code:
 Explanation:"""
 
     try:
-        return _generate(prompt).strip()
+        return _generate_with_fallback(prompt).strip()
     except Exception as e:
         return f"Could not explain code: {e}"
 
@@ -511,7 +533,7 @@ Original code:
 Optimized code:"""
 
     try:
-        optimized = _clean_code(_generate(prompt))
+        optimized = _clean_code(_generate_with_fallback(prompt))
     except Exception as e:
         return f"Could not optimize code: {e}"
 

@@ -311,6 +311,26 @@ def _looks_like_url(text: str) -> bool:
     return bool(re.match(r"https?://", text.strip()))
 
 
+# ── Backend 6: GPT-4o search-preview ─────────────────────────────────────────
+
+def _gpt4o_search(query: str) -> str | None:
+    """OpenAI gpt-4o-search-preview — has built-in web browsing."""
+    try:
+        from actions.openai_client import get_client, available
+        if not available():
+            return None
+        client = get_client()
+        resp = client.chat.completions.create(
+            model="gpt-4o-search-preview",
+            messages=[{"role": "user", "content": query}],
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        return text if len(text) > 30 else None
+    except Exception as e:
+        print(f"[WebSearch] ⚠️ GPT-4o search failed: {e}")
+        return None
+
+
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 def web_search(
@@ -391,6 +411,13 @@ def web_search(
     wiki = _wikipedia_summary(query)
     if wiki:
         return wiki
+
+    # ── 6. GPT-4o search-preview ──────────────────────────────────────────
+    print("[WebSearch] 🤖 Trying GPT-4o search-preview...")
+    gpt_result = _gpt4o_search(query)
+    if gpt_result:
+        print("[WebSearch] ✅ GPT-4o search OK.")
+        return gpt_result
 
     return (
         f"Hech bir manbada '{query}' bo'yicha ma'lumot topa olmadim, sir. "
