@@ -167,6 +167,13 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+alarm → set timed alarms at specific clock time (once or recurring). Trigger:
+  "soat 7:30 da uyg'ot" → action="set", time="07:30", label="Uyg'onish"
+  "ertaga 9 da signal" → action="set", time="ertaga 09:00"
+  "har kuni 8 da [nom]" → action="set", time="08:00", repeat=true
+  "signallarni ko'rsat" → action="list"
+  "[nom] signalni bekor qil" → action="delete", label="nom"
+  NOTE: Use alarm for specific CLOCK TIME. Use notifier for "X daqiqadan keyin".
 system_monitor → real-time CPU, RAM, disk, network, battery, top processes. Trigger:
   "tizim holati" / "CPU qancha" / "RAM holati" → action="status"
   "top jarayonlar" → action="top"

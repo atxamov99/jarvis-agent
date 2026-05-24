@@ -76,6 +76,7 @@ from actions.image_gen         import image_gen as image_gen_action
 from actions.macro_recorder    import macro_recorder as macro_action
 from actions.home_assistant    import home_assistant as ha_action
 from actions.system_monitor    import system_monitor as sysmon_action
+from actions.alarm             import alarm as alarm_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -973,6 +974,28 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "alarm",
+        "description": (
+            "Set alarms at specific times (once or recurring daily). "
+            "Trigger: 'soat 7:30 da uyg'ot', 'ertaga 9 da signal qo'y', "
+            "'har kuni 8 da signal', 'signalni bekor qil'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "set | list | delete"},
+                "time":   {"type": "STRING",
+                           "description": "Time: '07:30', 'ertaga 08:00', '2025-06-01 09:00'"},
+                "label":  {"type": "STRING",
+                           "description": "Alarm label/name (default: Signal)"},
+                "repeat": {"type": "BOOLEAN",
+                           "description": "Repeat daily (default: false)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "system_monitor",
         "description": (
             "Real-time CPU, RAM, disk, network, battery stats and process list. "
@@ -1822,6 +1845,11 @@ class JarvisLive:
                     None, lambda: sysmon_action(parameters=args, player=self.ui, speak=self.speak))
                 result = r or "Done."
 
+            elif name == "alarm":
+                r = await loop.run_in_executor(
+                    None, lambda: alarm_action(parameters=args, player=self.ui, speak=self.speak))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2338,6 +2366,8 @@ class JarvisOpenAI:
                 return ha_action(parameters=args, player=self.ui) or "Done."
             if name == "system_monitor":
                 return sysmon_action(parameters=args, player=self.ui) or "Done."
+            if name == "alarm":
+                return alarm_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
