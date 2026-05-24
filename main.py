@@ -89,6 +89,7 @@ from actions.disk_manager      import disk_manager as disk_action
 from actions.cron_manager      import cron_manager as cron_action
 from actions.voice_auth        import voice_auth as voice_auth_action
 from actions.face_auth         import face_auth as face_auth_action
+from actions.samsung_tv        import samsung_tv as samsung_tv_action
 import core.speaker_verifier as speaker_verifier
 import core.face_verifier as face_verifier
 
@@ -1653,6 +1654,37 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "samsung_tv",
+        "description": (
+            "Control Samsung Smart TV over WiFi (same network, no cable). "
+            "Power on/off, volume, channels, launch apps (YouTube, Netflix...), navigation. "
+            "Trigger: 'TVni yoq', 'ovozni oshir', 'Netflix och', 'TVni o'chir', "
+            "'kanal 5', 'TV holati', 'YouTubeni och'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":  {"type": "STRING",
+                            "description": "setup | on | off | vol+ | vol- | mute | volume | ch+ | ch- | channel | app | key | status | up | down | left | right | ok | back | home | play | pause | netflix | youtube"},
+                "ip":      {"type": "STRING",
+                            "description": "TV IP address (only for setup)"},
+                "mac":     {"type": "STRING",
+                            "description": "TV MAC address for Wake-on-LAN (only for setup/on)"},
+                "level":   {"type": "INTEGER",
+                            "description": "Volume level 0-100 (for action=volume)"},
+                "steps":   {"type": "INTEGER",
+                            "description": "Steps for vol+/vol- (default: 3)"},
+                "channel": {"type": "INTEGER",
+                            "description": "Channel number (for action=channel)"},
+                "app":     {"type": "STRING",
+                            "description": "App name: youtube | netflix | prime | spotify | plex | browser"},
+                "key":     {"type": "STRING",
+                            "description": "Remote key name (for action=key)"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -2189,6 +2221,11 @@ class JarvisLive:
             elif name == "face_auth":
                 r = await loop.run_in_executor(
                     None, lambda: face_auth_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "samsung_tv":
+                r = await loop.run_in_executor(
+                    None, lambda: samsung_tv_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -2769,6 +2806,8 @@ class JarvisOpenAI:
                 return voice_auth_action(parameters=args, player=self.ui) or "Done."
             if name == "face_auth":
                 return face_auth_action(parameters=args, player=self.ui) or "Done."
+            if name == "samsung_tv":
+                return samsung_tv_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

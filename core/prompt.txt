@@ -240,6 +240,20 @@ face_auth → enroll owner's face; Jarvis watches webcam and auto-mutes when own
   After enrollment: face watcher runs every 1s — owner visible → LISTENING, face gone → MUTED.
   Unknown face in frame → JARVIS silently ignores all commands.
   Profile stored at ~/.config/jarvis/face_profile.npy (chmod 600).
+samsung_tv → control Samsung Smart TV over WiFi (same network, no cable needed). Trigger:
+  SETUP (first time): "Samsung TV IP 192.168.1.50" → action="setup", ip="192.168.1.50"
+  "TVni yoq" → action="on" (Wake-on-LAN, needs MAC address in setup)
+  "TVni o'chir" → action="off"
+  "ovozni oshir" / "balandroq" → action="vol+" (3 steps default)
+  "ovozni past qil" → action="vol-"
+  "jim qil" / "mute" → action="mute"
+  "kanal 5" → action="channel", channel=5
+  "Netflix och" → action="netflix" OR action="app", app="netflix"
+  "YouTube och" → action="youtube" OR action="app", app="youtube"
+  "TV holati" → action="status" (model, name info)
+  Navigation: up/down/left/right/ok/back/home/play/pause
+  Config at ~/.config/jarvis/samsung_tv.json. Token auto-saved after first connection.
+  TV must be on same WiFi. First connection may show pairing prompt on TV screen.
 currency → real-time currency conversion (USD/EUR/RUB/UZS/GBP/CNY/TRY/KZT/AED...). Trigger:
   "100 dollar necha so'm" → amount=100, from="USD", to="UZS"
   "1 evro necha rubl" → from="EUR", to="RUB"
