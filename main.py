@@ -60,6 +60,7 @@ from actions.pomodoro          import pomodoro as pomodoro_action
 from actions.notifier          import notifier as notifier_action
 from actions.password_gen      import password_gen as password_gen_action
 from actions.archiver          import archiver as archiver_action
+from actions.speedtest         import speedtest as speedtest_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -957,6 +958,19 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "speedtest",
+        "description": (
+            "Measure internet speed: download, upload, ping. "
+            "Trigger: 'internet tezligini o'lcha', 'speedtest qil', "
+            "'qancha mbps bor', 'internet sekinmi'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
         "name": "archiver",
         "description": (
             "Zip, unzip, or list archive contents. Supports .zip, .tar.gz, .tar.bz2. "
@@ -1389,6 +1403,11 @@ class JarvisLive:
             elif name == "archiver":
                 r = await loop.run_in_executor(
                     None, lambda: archiver_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "speedtest":
+                r = await loop.run_in_executor(
+                    None, lambda: speedtest_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -1874,6 +1893,8 @@ class JarvisOpenAI:
                 return password_gen_action(parameters=args, player=self.ui) or "Done."
             if name == "archiver":
                 return archiver_action(parameters=args, player=self.ui) or "Done."
+            if name == "speedtest":
+                return speedtest_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

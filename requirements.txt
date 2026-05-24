@@ -29,3 +29,4 @@ pyqt6
 openwakeword
 onnxruntime
 speexdsp-ns
+speedtest-cli

@@ -167,6 +167,9 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+speedtest → measure internet download/upload speed and ping. Trigger:
+  "internet tezligini o'lcha" / "speedtest qil" / "qancha mbps bor" / "internet sekinmi"
+  No parameters needed — just call it.
 archiver → zip, unzip, or list archive contents (.zip, .tar.gz, .tar.bz2). Trigger:
   "X papkasini arxivla" → action="zip", source="X"
   "X.zip ni och / chiqar" → action="unzip", source="X.zip"
