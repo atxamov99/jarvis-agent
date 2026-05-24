@@ -88,7 +88,9 @@ from actions.focus_mode        import focus_mode as focus_action
 from actions.disk_manager      import disk_manager as disk_action
 from actions.cron_manager      import cron_manager as cron_action
 from actions.voice_auth        import voice_auth as voice_auth_action
+from actions.face_auth         import face_auth as face_auth_action
 import core.speaker_verifier as speaker_verifier
+import core.face_verifier as face_verifier
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -1629,6 +1631,28 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "face_auth",
+        "description": (
+            "Enroll owner's face from webcam so JARVIS watches and only listens when owner is visible. "
+            "If enrolled: Jarvis auto-mutes when face disappears, unmutes when owner is seen. "
+            "Trigger: 'yuzimni esla', 'face enroll', 'yuz profilini tekshir', 'yuz profilini o'chir'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":    {"type": "STRING",
+                              "description": "enroll | verify | reset | status | threshold"},
+                "seconds":   {"type": "INTEGER",
+                              "description": "Enrollment duration in seconds (default: 5, max: 30)"},
+                "cam":       {"type": "INTEGER",
+                              "description": "Camera index (default: 0)"},
+                "threshold": {"type": "NUMBER",
+                              "description": "Euclidean distance threshold (default: 0.55, lower = stricter)"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -2162,6 +2186,11 @@ class JarvisLive:
                     None, lambda: voice_auth_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "face_auth":
+                r = await loop.run_in_executor(
+                    None, lambda: face_auth_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2246,7 +2275,11 @@ class JarvisLive:
                 except Exception:
                     pass
 
-                if rms >= _GATE_OPEN_RMS:
+                # Lip-assisted gate: lower threshold when owner's lips are moving
+                lips_active  = face_verifier.is_speaking() and face_verifier.is_owner_seen()
+                _live_rms_th = _GATE_OPEN_RMS // 2 if lips_active else _GATE_OPEN_RMS
+
+                if rms >= _live_rms_th:
                     self._gate_attack_count += 1
                     if self._gate_attack_count >= _GATE_ATTACK:
                         # Gate wants to open — check speaker first
@@ -2422,6 +2455,7 @@ class JarvisLive:
                     self.ui.write_log("SYS: JARVIS online.")
                     self.ui.push_notification("JARVIS systems online")
                     self.speak("JARVIS systems online. Ready.")
+                    face_verifier.start_face_watcher(self.ui)
 
                     tg.create_task(self._send_realtime())
                     tg.create_task(self._listen_audio())
@@ -2733,6 +2767,8 @@ class JarvisOpenAI:
                 return cron_action(parameters=args, player=self.ui) or "Done."
             if name == "voice_auth":
                 return voice_auth_action(parameters=args, player=self.ui) or "Done."
+            if name == "face_auth":
+                return face_auth_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
@@ -2895,6 +2931,7 @@ class JarvisOpenAI:
         self.ui.write_log("SYS: JARVIS online (GPT-4o).")
         self.ui.push_notification("JARVIS systems online")
         self.speak("J.A.R.V.I.S systems online. GPT-4 ready.")
+        face_verifier.start_face_watcher(self.ui)
 
         audio_buffer: list = []
         gate_open         = False
@@ -2924,7 +2961,11 @@ class JarvisOpenAI:
             except Exception:
                 pass
 
-            if rms >= _GATE_OPEN_RMS:
+            # Lip-assisted gate: if face watcher detects owner speaking, lower threshold
+            lips_active = face_verifier.is_speaking() and face_verifier.is_owner_seen()
+            effective_rms = _GATE_OPEN_RMS // 2 if lips_active else _GATE_OPEN_RMS
+
+            if rms >= effective_rms:
                 attack_count += 1
                 if attack_count >= _GATE_ATTACK:
                     gate_open = True
@@ -2985,6 +3026,7 @@ def main():
         return
 
     speaker_verifier.load_profile()
+    face_verifier.load_profile()
     ui = JarvisUI("face.png")
 
     def _on_double_clap():

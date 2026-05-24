@@ -231,6 +231,15 @@ voice_auth → enroll owner's voice so JARVIS only responds to them (MFCC + GMM)
   "ovoz profilini o'chir" → action="reset" (anyone can speak again)
   After enrollment: other voices are silently rejected in BOTH Gemini Live and Whisper paths.
   Profile stored at ~/.config/jarvis/voice_profile.npz (chmod 600).
+face_auth → enroll owner's face; Jarvis watches webcam and auto-mutes when owner not visible. Trigger:
+  "yuzimni esla" / "face enroll" → action="enroll" (records 5s from webcam)
+  "10 soniya yuzimni o'rgat" → action="enroll", seconds=10
+  "yuz testi" → action="verify" (instant check: is this the owner?)
+  "yuz profili holati" → action="status"
+  "yuz profilini o'chir" → action="reset"
+  After enrollment: face watcher runs every 1s — owner visible → LISTENING, face gone → MUTED.
+  Unknown face in frame → JARVIS silently ignores all commands.
+  Profile stored at ~/.config/jarvis/face_profile.npy (chmod 600).
 currency → real-time currency conversion (USD/EUR/RUB/UZS/GBP/CNY/TRY/KZT/AED...). Trigger:
   "100 dollar necha so'm" → amount=100, from="USD", to="UZS"
   "1 evro necha rubl" → from="EUR", to="RUB"
