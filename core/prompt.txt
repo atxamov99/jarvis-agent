@@ -167,6 +167,11 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+archiver → zip, unzip, or list archive contents (.zip, .tar.gz, .tar.bz2). Trigger:
+  "X papkasini arxivla" → action="zip", source="X"
+  "X.zip ni och / chiqar" → action="unzip", source="X.zip"
+  "X.zip tarkibini ko'rsat" → action="list", source="X.zip"
+  Destination is optional; auto-named alongside source if omitted.
 password_gen → generate a secure random password, PIN, or passphrase. Trigger:
   "parol yaratib ber" / "kuchli parol kerak" → mode="password" (default 16 chars)
   "6 xonali PIN" → mode="pin", length=6

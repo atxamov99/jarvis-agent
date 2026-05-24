@@ -59,6 +59,7 @@ from actions.notes             import notes as notes_action
 from actions.pomodoro          import pomodoro as pomodoro_action
 from actions.notifier          import notifier as notifier_action
 from actions.password_gen      import password_gen as password_gen_action
+from actions.archiver          import archiver as archiver_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -956,6 +957,25 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "archiver",
+        "description": (
+            "Zip, unzip, or list archive contents. Supports .zip, .tar.gz, .tar.bz2. "
+            "Trigger: 'X papkasini arxivla', 'X.zip ni oч', 'arxiv tarkibini ko'rsat'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":      {"type": "STRING",
+                                "description": "zip | unzip | list"},
+                "source":      {"type": "STRING",
+                                "description": "Source file or folder path"},
+                "destination": {"type": "STRING",
+                                "description": "Output path (optional; auto-named if omitted)"},
+            },
+            "required": ["action", "source"]
+        }
+    },
+    {
         "name": "password_gen",
         "description": (
             "Generate secure random passwords, PINs, or passphrases. "
@@ -1364,6 +1384,11 @@ class JarvisLive:
             elif name == "password_gen":
                 r = await loop.run_in_executor(
                     None, lambda: password_gen_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "archiver":
+                r = await loop.run_in_executor(
+                    None, lambda: archiver_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -1847,6 +1872,8 @@ class JarvisOpenAI:
                 return notifier_action(parameters=args, player=self.ui) or "Done."
             if name == "password_gen":
                 return password_gen_action(parameters=args, player=self.ui) or "Done."
+            if name == "archiver":
+                return archiver_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
