@@ -34,3 +34,4 @@ google-auth-oauthlib
 pypdf
 pyotp
 pynput
+yt-dlp

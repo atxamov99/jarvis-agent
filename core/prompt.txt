@@ -167,6 +167,12 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+yt_downloader → download YouTube videos (MP4) or audio (MP3) via yt-dlp. Trigger:
+  "bu videoni yuklab ol [URL]" → mode="video" (best quality)
+  "720p da yukla [URL]" → quality="720"
+  "faqat musiqa sifatida yukla [URL]" → mode="audio" (MP3)
+  "video haqida ma'lumot [URL]" → mode="info" (title, duration, views)
+  Saves to ~/Downloads/YouTube/.
 currency → real-time currency conversion (USD/EUR/RUB/UZS/GBP/CNY/TRY/KZT/AED...). Trigger:
   "100 dollar necha so'm" → amount=100, from="USD", to="UZS"
   "1 evro necha rubl" → from="EUR", to="RUB"

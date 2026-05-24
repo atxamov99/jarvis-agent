@@ -79,6 +79,7 @@ from actions.system_monitor    import system_monitor as sysmon_action
 from actions.alarm             import alarm as alarm_action
 from actions.todo              import todo as todo_action
 from actions.currency          import currency as currency_action
+from actions.yt_downloader     import yt_downloader as ytdl_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -973,6 +974,26 @@ TOOL_DECLARATIONS = [
                             "description": "Additional delay in seconds"},
             },
             "required": ["message"]
+        }
+    },
+    {
+        "name": "yt_downloader",
+        "description": (
+            "Download YouTube videos (MP4) or audio (MP3) via yt-dlp. "
+            "Trigger: 'bu videoni yuklab ol', 'YouTube dan musiqa yukla', "
+            "'720p da yukla', 'video haqida ma'lumot ber'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "url":     {"type": "STRING",
+                            "description": "YouTube video URL"},
+                "mode":    {"type": "STRING",
+                            "description": "video | audio | info (default: video)"},
+                "quality": {"type": "STRING",
+                            "description": "best | 1080 | 720 | 480 | 360 (default: best)"},
+            },
+            "required": ["url"]
         }
     },
     {
@@ -1912,6 +1933,11 @@ class JarvisLive:
                     None, lambda: currency_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "yt_downloader":
+                r = await loop.run_in_executor(
+                    None, lambda: ytdl_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2434,6 +2460,8 @@ class JarvisOpenAI:
                 return todo_action(parameters=args, player=self.ui) or "Done."
             if name == "currency":
                 return currency_action(parameters=args, player=self.ui) or "Done."
+            if name == "yt_downloader":
+                return ytdl_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
