@@ -167,6 +167,13 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+password_gen → generate a secure random password, PIN, or passphrase. Trigger:
+  "parol yaratib ber" / "kuchli parol kerak" → mode="password" (default 16 chars)
+  "6 xonali PIN" → mode="pin", length=6
+  "12 belgili parol" → length=12
+  "3 ta parol" → count=3
+  "faqat harflar" → charset="letters"; "harflar va raqamlar" → charset="alphanumeric"
+  "yodlab olinadigan parol" → mode="passphrase"
 notifier → schedule a one-shot desktop notification popup after N minutes/seconds. Trigger:
   "10 daqiqadan keyin eslatib ber: [xabar]" → minutes=10, message="[xabar]"
   "30 soniyadan keyin bildirish yubor: [xabar]" → seconds=30

@@ -58,6 +58,7 @@ from actions.clap_detector     import ClapDetector
 from actions.notes             import notes as notes_action
 from actions.pomodoro          import pomodoro as pomodoro_action
 from actions.notifier          import notifier as notifier_action
+from actions.password_gen      import password_gen as password_gen_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -954,6 +955,28 @@ TOOL_DECLARATIONS = [
             "required": ["message"]
         }
     },
+    {
+        "name": "password_gen",
+        "description": (
+            "Generate secure random passwords, PINs, or passphrases. "
+            "Trigger: 'parol yaratib ber', 'kuchli parol', '6 xonali PIN', "
+            "'yangi parol kerak', 'tasodifiy parol'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "mode":    {"type": "STRING",
+                            "description": "password | pin | passphrase (default: password)"},
+                "length":  {"type": "INTEGER",
+                            "description": "Length of password or PIN (default: 16)"},
+                "count":   {"type": "INTEGER",
+                            "description": "How many to generate (default: 1, max: 10)"},
+                "charset": {"type": "STRING",
+                            "description": "all | alphanumeric | letters | digits | symbols (default: all)"},
+            },
+            "required": []
+        }
+    },
 ]
 
 class JarvisLive:
@@ -1336,6 +1359,11 @@ class JarvisLive:
             elif name == "notifier":
                 r = await loop.run_in_executor(
                     None, lambda: notifier_action(parameters=args, player=self.ui, speak=self.speak))
+                result = r or "Done."
+
+            elif name == "password_gen":
+                r = await loop.run_in_executor(
+                    None, lambda: password_gen_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -1817,6 +1845,8 @@ class JarvisOpenAI:
                 return pomodoro_action(parameters=args, player=self.ui) or "Done."
             if name == "notifier":
                 return notifier_action(parameters=args, player=self.ui) or "Done."
+            if name == "password_gen":
+                return password_gen_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
