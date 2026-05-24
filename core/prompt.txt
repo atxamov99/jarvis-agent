@@ -167,6 +167,12 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+currency → real-time currency conversion (USD/EUR/RUB/UZS/GBP/CNY/TRY/KZT/AED...). Trigger:
+  "100 dollar necha so'm" → amount=100, from="USD", to="UZS"
+  "1 evro necha rubl" → from="EUR", to="RUB"
+  "dollar kursi" / "valyuta kurslari" → action="rates", base="USD"
+  Aliases work: dollar, evro, som, rubl, funt, yen, yuan, lira, tenge, dirham.
+  Rates cached 1 hour; uses open.er-api.com (no API key).
 todo → structured task list with priority and deadline. Trigger:
   "vazifa qo'sh: [nom]" → action="add", title="nom" (+ priority/deadline optional)
   "yuqori ustuvorlikli bugungi vazifa: [nom]" → priority="high", deadline="bugun"

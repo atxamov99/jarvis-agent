@@ -78,6 +78,7 @@ from actions.home_assistant    import home_assistant as ha_action
 from actions.system_monitor    import system_monitor as sysmon_action
 from actions.alarm             import alarm as alarm_action
 from actions.todo              import todo as todo_action
+from actions.currency          import currency as currency_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -972,6 +973,30 @@ TOOL_DECLARATIONS = [
                             "description": "Additional delay in seconds"},
             },
             "required": ["message"]
+        }
+    },
+    {
+        "name": "currency",
+        "description": (
+            "Real-time currency conversion: USD, EUR, RUB, UZS, GBP, CNY, TRY, KZT, AED and more. "
+            "No API key needed. Trigger: '100 dollar necha so'm', '1 evro necha rubl', "
+            "'valyuta kurslari', 'dollar kursi'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":   {"type": "STRING",
+                             "description": "convert | rates (default: convert)"},
+                "amount":   {"type": "NUMBER",
+                             "description": "Amount to convert (default: 1)"},
+                "from":     {"type": "STRING",
+                             "description": "Source currency: 'USD', 'dollar', 'evro', 'som', 'rubl'..."},
+                "to":       {"type": "STRING",
+                             "description": "Target currency"},
+                "base":     {"type": "STRING",
+                             "description": "Base currency for rates table (default: USD)"},
+            },
+            "required": []
         }
     },
     {
@@ -1882,6 +1907,11 @@ class JarvisLive:
                     None, lambda: todo_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "currency":
+                r = await loop.run_in_executor(
+                    None, lambda: currency_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2402,6 +2432,8 @@ class JarvisOpenAI:
                 return alarm_action(parameters=args, player=self.ui) or "Done."
             if name == "todo":
                 return todo_action(parameters=args, player=self.ui) or "Done."
+            if name == "currency":
+                return currency_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
