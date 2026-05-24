@@ -188,6 +188,12 @@ network_tools → network diagnostics: IP, ping, DNS, port scan. Trigger:
   "192.168.1.1 port skan" → action="scan", host="192.168.1.1"
   "80,443 portlarni tekshir" → action="scan", ports="80,443"
   Uses ipinfo.io for geolocation; stdlib socket for DNS/port scan; ping CLI.
+hash_tool → compute/verify cryptographic hashes (stdlib hashlib, no deps). Trigger:
+  "hello sha256" / "bu matnning heshi" → action="hash", text="hello"
+  "fayl heshi: /path/to/file" → action="file", file="/path"
+  "heshni tekshir" → action="verify", file="...", expected="abc123..."
+  "barcha heshlar" → action="all" (shows MD5/SHA1/SHA256/SHA512/SHA224/SHA384)
+  Default algo: sha256. Supports: md5 | sha1 | sha256 | sha512 | sha224 | sha384.
 currency → real-time currency conversion (USD/EUR/RUB/UZS/GBP/CNY/TRY/KZT/AED...). Trigger:
   "100 dollar necha so'm" → amount=100, from="USD", to="UZS"
   "1 evro necha rubl" → from="EUR", to="RUB"

@@ -82,6 +82,7 @@ from actions.currency          import currency as currency_action
 from actions.yt_downloader     import yt_downloader as ytdl_action
 from actions.screen_recorder   import screen_recorder as screenrec_action
 from actions.network_tools     import network_tools as network_action
+from actions.hash_tool         import hash_tool as hash_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -1490,6 +1491,29 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "hash_tool",
+        "description": (
+            "Compute and verify cryptographic hashes: MD5, SHA1, SHA256, SHA512 for text or files. "
+            "Trigger: 'bu matnning SHA256', 'fayl heshi', 'heshni tekshir'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":   {"type": "STRING",
+                             "description": "hash | file | verify | all"},
+                "algo":     {"type": "STRING",
+                             "description": "md5 | sha1 | sha256 | sha512 | sha224 | sha384 (default: sha256)"},
+                "text":     {"type": "STRING",
+                             "description": "Text to hash (for action=hash or all)"},
+                "file":     {"type": "STRING",
+                             "description": "File path to hash (for action=file/verify/all)"},
+                "expected": {"type": "STRING",
+                             "description": "Expected hash digest for verification"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -1990,6 +2014,11 @@ class JarvisLive:
             elif name == "network_tools":
                 r = await loop.run_in_executor(
                     None, lambda: network_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "hash_tool":
+                r = await loop.run_in_executor(
+                    None, lambda: hash_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -2520,6 +2549,8 @@ class JarvisOpenAI:
                 return screenrec_action(parameters=args, player=self.ui) or "Done."
             if name == "network_tools":
                 return network_action(parameters=args, player=self.ui) or "Done."
+            if name == "hash_tool":
+                return hash_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
