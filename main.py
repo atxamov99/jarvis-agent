@@ -3,10 +3,12 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import asyncio
+import os
 import re
 import threading
 import json
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -64,6 +66,27 @@ def get_base_dir():
     return Path(__file__).resolve().parent
 
 
+def _register_startup_windows() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import shutil
+        startup_dir = Path(os.environ.get("APPDATA", "")) / \
+            "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+        if not startup_dir.exists():
+            return
+        dst = startup_dir / "JARVIS.bat"
+        src = Path(__file__).parent / "start.bat"
+        if dst.exists():
+            return
+        if not src.exists():
+            return
+        shutil.copy2(src, dst)
+        print(f"[JARVIS] Auto-startup registered: {dst}")
+    except Exception as e:
+        print(f"[JARVIS] Could not register startup: {e}")
+
+
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
@@ -97,6 +120,35 @@ _GATE_HOLD        = 28     # frames (~1.8 s) gate stays open after level drops
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)["gemini_api_key"]
+
+def _get_openai_api_key() -> str:
+    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
+        d = json.load(f)
+    return d.get("openai_api_key", "")
+
+def _to_openai_tools(gemini_tools: list) -> list:
+    """Convert Gemini tool declarations to OpenAI function-calling format."""
+    def _fix_types(obj):
+        if isinstance(obj, dict):
+            return {
+                k: (_fix_types(v) if k != "type" else (v.lower() if isinstance(v, str) else v))
+                for k, v in obj.items()
+            }
+        if isinstance(obj, list):
+            return [_fix_types(i) for i in obj]
+        return obj
+    result = []
+    for t in gemini_tools:
+        params = _fix_types(t.get("parameters", {"type": "object", "properties": {}}))
+        result.append({
+            "type": "function",
+            "function": {
+                "name":        t["name"],
+                "description": t.get("description", ""),
+                "parameters":  params,
+            }
+        })
+    return result
 
 
 def _get_openai_key() -> str | None:
@@ -777,16 +829,19 @@ class JarvisLive:
         self._gate_attack_count = 0
         self._gate_hold_count   = 0
 
-        # Wake-word detector ("hey jarvis"). Starts muted; unmutes on wake.
+        # Wake-word detector ("hey jarvis"). Always starts muted; unmutes on wake or F4.
+        self.ui.muted = True
         self._wake_detector = None
         if _WAKE_WORD_AVAILABLE:
             try:
                 self._wake_detector = WakeWordDetector(on_wake=self._on_wake_word)
-                self.ui.muted = True
-                print("[JARVIS] 💤 Started in sleep mode — say 'hey jarvis' to wake")
+                print("[JARVIS] 💤 Wake-word active — say 'hey jarvis' to wake")
             except Exception as e:
                 print(f"[JARVIS] ⚠️ Wake-word init failed: {e}")
+                print("[JARVIS] 💤 Sleeping — press F4 to activate")
                 self._wake_detector = None
+        else:
+            print("[JARVIS] 💤 Sleeping — press F4 to activate (wake-word unavailable)")
 
     def _on_wake_word(self):
         """Called by WakeWordDetector when 'hey jarvis' is heard.
@@ -948,7 +1003,7 @@ class JarvisLive:
         args = dict(fc.args or {})
 
         print(f"[JARVIS] 🔧 {name}  {args}")
-        self.ui.set_state("THINKING")
+        self.ui.set_state("EXECUTING")
 
         if name == "save_memory":
             category = args.get("category", "notes")
@@ -1140,6 +1195,7 @@ class JarvisLive:
                 result = f"Unknown tool: {name}"
 
         except Exception as e:
+            self.ui._win.hud.trigger_error()
             result = f"Tool '{name}' failed: {e}"
             traceback.print_exc()
             self.speak_error(name, e)
@@ -1181,6 +1237,12 @@ class JarvisLive:
                 # Noise gate: reject background noise and brief transients
                 arr = np.frombuffer(indata, dtype=np.int16)
                 rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
+
+                # Feed RMS level to UI waveform
+                try:
+                    self.ui._win.hud.set_audio_level(rms)
+                except Exception:
+                    pass
 
                 if rms >= _GATE_OPEN_RMS:
                     self._gate_attack_count += 1
@@ -1253,6 +1315,7 @@ class JarvisLive:
                             full_out = _merge_transcript_fragments(out_buf)
                             if full_out:
                                 self.ui.write_log(f"Jarvis: {full_out}")
+                                self.ui.push_notification(full_out[:60] if full_out else "Response received")
                             out_buf = []
 
                     if response.tool_call:
@@ -1331,6 +1394,7 @@ class JarvisLive:
                     print("[JARVIS] ✅ Connected.")
                     self.ui.set_state("LISTENING")
                     self.ui.write_log("SYS: JARVIS online.")
+                    self.ui.push_notification("JARVIS systems online")
                     self.speak("JARVIS systems online. Ready.")
 
                     tg.create_task(self._send_realtime())
@@ -1345,6 +1409,416 @@ class JarvisLive:
             self.ui.set_state("THINKING")
             print("[JARVIS] 🔄 Reconnecting in 3s...")
             await asyncio.sleep(3)
+
+OPENAI_TOOLS = _to_openai_tools(TOOL_DECLARATIONS)
+
+
+class JarvisOpenAI:
+    """GPT-4o powered JARVIS: Whisper STT → GPT-4o + tools → edge-tts voice."""
+
+    def __init__(self, ui: JarvisUI):
+        from openai import OpenAI as _OAI
+        self.ui = ui
+        self._client = _OAI(api_key=_get_openai_api_key())
+        self._history: list[dict] = []
+        self._is_speaking   = False
+        self._speaking_lock = threading.Lock()
+        self._processing    = False
+
+        self.ui.on_text_command = self._on_text_command
+
+        # Noise gate
+        self._gate_open         = False
+        self._gate_attack_count = 0
+        self._gate_hold_count   = 0
+
+        # Always start muted; wake-word or F4 unmutes
+        self.ui.muted = True
+        self._wake_detector = None
+        if _WAKE_WORD_AVAILABLE:
+            try:
+                self._wake_detector = WakeWordDetector(on_wake=self._on_wake_word)
+                print("[JARVIS] 💤 Wake-word active — say 'hey jarvis' to wake")
+            except Exception as e:
+                print(f"[JARVIS] ⚠️ Wake-word init failed: {e}")
+                print("[JARVIS] 💤 Sleeping — press F4 to activate")
+        else:
+            print("[JARVIS] 💤 Sleeping — press F4 to activate (wake-word unavailable)")
+
+    # ── Wake-word ─────────────────────────────────────────────────────
+
+    def _on_wake_word(self):
+        if self.ui.muted:
+            self.ui.muted = False
+            self.ui.write_log("🟢 Wake-word detected — listening")
+            print("[JARVIS] 🟢 Wake-word triggered — unmuted")
+
+    # ── Speaking state ────────────────────────────────────────────────
+
+    def set_speaking(self, value: bool):
+        with self._speaking_lock:
+            self._is_speaking = value
+        if value:
+            self.ui.set_state("SPEAKING")
+        elif not self.ui.muted:
+            self.ui.set_state("LISTENING")
+            if self._wake_detector:
+                if hasattr(self, "_sleep_timer") and self._sleep_timer:
+                    self._sleep_timer.cancel()
+                self._sleep_timer = threading.Timer(8.0, self._auto_sleep)
+                self._sleep_timer.daemon = True
+                self._sleep_timer.start()
+
+    def _auto_sleep(self):
+        with self._speaking_lock:
+            speaking = self._is_speaking
+        if not self.ui.muted and not speaking:
+            self.ui.muted = True
+            print("[JARVIS] 💤 Auto-sleep")
+            self.ui.write_log("💤 Sleeping — say 'hey jarvis'")
+
+    # ── TTS ───────────────────────────────────────────────────────────
+
+    def speak(self, text: str):
+        self.set_speaking(True)  # mark BEFORE thread starts to block mic
+        threading.Thread(target=self._speak_bg, args=(text,), daemon=True).start()
+
+    def _speak_bg(self, text: str):
+        try:
+            # OpenAI TTS → PCM (24kHz, 16-bit, mono) — no format conversion needed
+            response = self._client.audio.speech.create(
+                model="tts-1",
+                voice="onyx",           # deep, authoritative — best for JARVIS
+                input=text,
+                response_format="pcm",  # raw signed-16 LE at 24 kHz
+            )
+            pcm = response.content
+            arr = np.frombuffer(pcm, dtype=np.int16)
+            sd.play(arr, samplerate=24000)
+            sd.wait()
+        except Exception as e:
+            print(f"[TTS] Error: {e}")
+            traceback.print_exc()
+        finally:
+            self.set_speaking(False)
+
+    def speak_error(self, tool_name: str, error: str):
+        self.ui.write_log(f"ERR: {tool_name} — {str(error)[:120]}")
+        self.speak(f"Tool {tool_name} failed. {str(error)[:80]}")
+
+    # ── System prompt ─────────────────────────────────────────────────
+
+    def _system_prompt(self) -> str:
+        from datetime import datetime
+        memory  = load_memory()
+        mem_str = format_memory_for_prompt(memory)
+        sys_p   = _load_system_prompt()
+        now     = datetime.now()
+        ts      = now.strftime("%A, %B %d, %Y — %I:%M %p")
+        parts   = [f"[CURRENT DATE & TIME]\nRight now it is: {ts}\n"]
+        if mem_str:
+            parts.append(mem_str)
+        parts.append(sys_p)
+        return "\n".join(parts)
+
+    # ── Tool execution ────────────────────────────────────────────────
+
+    def _execute_tool(self, name: str, args: dict) -> str:
+        print(f"[JARVIS] 🔧 {name}  {args}")
+        self.ui.set_state("EXECUTING")
+
+        try:
+            if name == "save_memory":
+                category = args.get("category", "notes")
+                key      = args.get("key", "")
+                value    = args.get("value", "")
+                if key and value:
+                    update_memory({category: {key: {"value": value}}})
+                return "ok"
+
+            if name == "delete_memory":
+                scope    = (args.get("scope") or "").lower().strip()
+                category = args.get("category", "")
+                key      = args.get("key", "")
+                if scope == "all":
+                    return forget_all()
+                elif scope == "category" and category:
+                    return forget_category(category)
+                elif scope == "entry" and category and key:
+                    return forget(key, category)
+                return "Invalid params."
+
+            if name == "open_app":
+                return open_app(parameters=args, response=None, player=self.ui) or "Done."
+            if name == "weather_report":
+                return weather_action(parameters=args, player=self.ui) or "Done."
+            if name == "browser_control":
+                return browser_control(parameters=args, player=self.ui) or "Done."
+            if name == "file_controller":
+                return file_controller(parameters=args, player=self.ui) or "Done."
+            if name == "send_message":
+                return send_message(parameters=args, response=None, player=self.ui, session_memory=None) or "Done."
+            if name == "reminder":
+                return reminder(parameters=args, response=None, player=self.ui) or "Done."
+            if name == "youtube_video":
+                return youtube_video(parameters=args, response=None, player=self.ui) or "Done."
+            if name == "screen_process":
+                threading.Thread(
+                    target=screen_process,
+                    kwargs={"parameters": args, "response": None,
+                            "player": self.ui, "session_memory": None},
+                    daemon=True,
+                ).start()
+                return "Vision module activated."
+            if name == "computer_settings":
+                return computer_settings(parameters=args, response=None, player=self.ui) or "Done."
+            if name == "desktop_control":
+                return desktop_control(parameters=args, player=self.ui) or "Done."
+            if name == "code_helper":
+                return code_helper(parameters=args, player=self.ui, speak=self.speak) or "Done."
+            if name == "dev_agent":
+                return dev_agent(parameters=args, player=self.ui, speak=self.speak) or "Done."
+            if name == "agent_task":
+                from agent.task_queue import get_queue, TaskPriority
+                pmap = {"low": TaskPriority.LOW, "normal": TaskPriority.NORMAL, "high": TaskPriority.HIGH}
+                pri  = pmap.get(args.get("priority", "normal").lower(), TaskPriority.NORMAL)
+                tid  = get_queue().submit(goal=args.get("goal", ""), priority=pri, speak=self.speak)
+                return f"Task started (ID: {tid})."
+            if name == "web_search":
+                return web_search_action(parameters=args, player=self.ui) or "Done."
+            if name == "translate_text":
+                return translate_action(parameters=args, player=self.ui) or "Done."
+            if name == "file_processor":
+                if not args.get("file_path") and self.ui.current_file:
+                    args["file_path"] = self.ui.current_file
+                return file_processor(parameters=args, player=self.ui, speak=self.speak) or "Done."
+            if name == "computer_control":
+                return computer_control(parameters=args, player=self.ui) or "Done."
+            if name == "game_updater":
+                return game_updater(parameters=args, player=self.ui, speak=self.speak) or "Done."
+            if name == "flight_finder":
+                return flight_finder(parameters=args, player=self.ui) or "Done."
+            if name == "ollama_query":
+                return _ollama_query(args)
+            if name == "toggle_mute":
+                if args.get("action", "mute").lower() == "mute":
+                    self.ui.muted = True; return "Muted."
+                self.ui.muted = False; return "Active."
+            if name == "clipboard":
+                return clipboard_action(parameters=args, player=self.ui) or "Done."
+            if name == "system_info":
+                return system_info_action(parameters=args, player=self.ui) or "Done."
+            if name == "close_apps":
+                return close_apps_action(parameters=args, player=self.ui) or "Done."
+            if name == "shutdown_jarvis":
+                self.ui.write_log("SYS: Shutdown requested.")
+                def _bye():
+                    time.sleep(2); os._exit(0)
+                threading.Thread(target=_bye, daemon=True).start()
+                return "Shutting down."
+            return f"Unknown tool: {name}"
+
+        except Exception as e:
+            self.ui._win.hud.trigger_error()
+            traceback.print_exc()
+            self.speak_error(name, e)
+            return f"Error: {e}"
+        finally:
+            if not self.ui.muted:
+                self.ui.set_state("LISTENING")
+
+    # ── LLM pipeline ─────────────────────────────────────────────────
+
+    def _on_text_command(self, text: str):
+        threading.Thread(target=self._process, args=(text,), daemon=True).start()
+
+    def _process(self, user_text: str):
+        if self._processing:
+            return
+        self._processing = True
+        try:
+            self.ui.set_state("THINKING")
+            self.ui.write_log(f"You: {user_text}")
+            self._history.append({"role": "user", "content": user_text})
+
+            # Keep context under control
+            if len(self._history) > 30:
+                self._history = self._history[-28:]
+
+            messages = [{"role": "system", "content": self._system_prompt()}] + self._history
+
+            response = self._client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                tools=OPENAI_TOOLS,
+                tool_choice="auto",
+                max_tokens=1024,
+            )
+            msg = response.choices[0].message
+
+            # Tool-call loop
+            while msg.tool_calls:
+                # Append assistant's tool-call turn (must include tool_calls list)
+                assistant_entry = {"role": "assistant", "content": msg.content or ""}
+                if msg.tool_calls:
+                    assistant_entry["tool_calls"] = [
+                        {
+                            "id":   tc.id,
+                            "type": "function",
+                            "function": {
+                                "name":      tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ]
+                self._history.append(assistant_entry)
+
+                tool_results = []
+                for tc in msg.tool_calls:
+                    args   = json.loads(tc.function.arguments)
+                    result = self._execute_tool(tc.function.name, args)
+                    print(f"[JARVIS] 📤 {tc.function.name} → {str(result)[:80]}")
+                    tool_results.append({
+                        "role":         "tool",
+                        "tool_call_id": tc.id,
+                        "content":      str(result),
+                    })
+
+                self._history.extend(tool_results)
+                messages = [{"role": "system", "content": self._system_prompt()}] + self._history
+                self.ui.set_state("THINKING")
+                response = self._client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    tools=OPENAI_TOOLS,
+                    tool_choice="auto",
+                    max_tokens=1024,
+                )
+                msg = response.choices[0].message
+
+            final = (msg.content or "").strip()
+            if final:
+                self._history.append({"role": "assistant", "content": final})
+                self.ui.write_log(f"Jarvis: {final}")
+                self.ui.push_notification(final[:60])
+                self.speak(final)
+            else:
+                if not self.ui.muted:
+                    self.ui.set_state("LISTENING")
+
+        except Exception as e:
+            print(f"[JARVIS] ❌ {e}")
+            traceback.print_exc()
+            self.ui._win.hud.trigger_error()
+            if not self.ui.muted:
+                self.ui.set_state("LISTENING")
+        finally:
+            self._processing = False
+
+    # ── STT: Whisper ──────────────────────────────────────────────────
+
+    def _transcribe(self, audio_chunks: list):
+        try:
+            import io, wave
+            raw = b"".join(audio_chunks)
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wf:
+                wf.setnchannels(CHANNELS)
+                wf.setsampwidth(2)
+                wf.setframerate(SEND_SAMPLE_RATE)
+                wf.writeframes(raw)
+            buf.seek(0)
+            buf.name = "audio.wav"
+            self.ui.set_state("THINKING")
+            tx = self._client.audio.transcriptions.create(
+                model="whisper-1",
+                file=buf,
+            )
+            text = tx.text.strip()
+            print(f"[Whisper] → {text[:80]}")
+            if text:
+                self._process(text)
+            else:
+                if not self.ui.muted:
+                    self.ui.set_state("LISTENING")
+        except Exception as e:
+            print(f"[Whisper] Error: {e}")
+            if not self.ui.muted:
+                self.ui.set_state("LISTENING")
+
+    # ── Mic loop ──────────────────────────────────────────────────────
+
+    def run(self):
+        print("[JARVIS] ✅ GPT-4o pipeline ready.")
+        self.ui.set_state("LISTENING")
+        self.ui.write_log("SYS: JARVIS online (GPT-4o).")
+        self.ui.push_notification("JARVIS systems online")
+        self.speak("J.A.R.V.I.S systems online. GPT-4 ready.")
+
+        audio_buffer: list = []
+        gate_open         = False
+        attack_count      = 0
+        hold_count        = 0
+
+        def callback(indata, frames, time_info, status):
+            nonlocal gate_open, attack_count, hold_count, audio_buffer
+
+            with self._speaking_lock:
+                jarvis_speaking = self._is_speaking
+
+            if self._wake_detector and self.ui.muted and not jarvis_speaking:
+                try:
+                    self._wake_detector.feed(indata)
+                except Exception:
+                    pass
+
+            if jarvis_speaking or self.ui.muted or self._processing:
+                return
+
+            arr = np.frombuffer(indata, dtype=np.int16)
+            rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
+
+            try:
+                self.ui._win.hud.set_audio_level(rms)
+            except Exception:
+                pass
+
+            if rms >= _GATE_OPEN_RMS:
+                attack_count += 1
+                if attack_count >= _GATE_ATTACK:
+                    gate_open = True
+                hold_count = _GATE_HOLD
+            else:
+                attack_count = 0
+                if hold_count > 0:
+                    hold_count -= 1
+                else:
+                    if gate_open:
+                        gate_open = False
+                        if audio_buffer:
+                            buf_copy    = audio_buffer.copy()
+                            audio_buffer = []
+                            threading.Thread(
+                                target=self._transcribe,
+                                args=(buf_copy,),
+                                daemon=True,
+                            ).start()
+
+            if gate_open:
+                audio_buffer.append(indata.tobytes())
+
+        with sd.InputStream(
+            samplerate=SEND_SAMPLE_RATE,
+            channels=CHANNELS,
+            dtype="int16",
+            blocksize=CHUNK_SIZE,
+            callback=callback,
+        ):
+            print("[JARVIS] 🎤 Mic stream open (GPT-4o / Whisper)")
+            while True:
+                time.sleep(0.1)
+
 
 def _ensure_single_instance() -> bool:
     """Return True if we are the first instance. Focus existing window and return False otherwise."""
@@ -1374,14 +1848,26 @@ def main():
 
     def runner():
         ui.wait_for_api_key()
-        jarvis = JarvisLive(ui)
-        try:
-            asyncio.run(jarvis.run())
-        except KeyboardInterrupt:
-            print("\n🔴 Shutting down...")
+        # Use GPT-4o pipeline if openai_api_key is set, else fall back to Gemini Live
+        oai_key = _get_openai_api_key()
+        if oai_key:
+            print("[JARVIS] 🧠 Backend: GPT-4o (OpenAI)")
+            jarvis = JarvisOpenAI(ui)
+            try:
+                jarvis.run()
+            except KeyboardInterrupt:
+                print("\n🔴 Shutting down...")
+        else:
+            print("[JARVIS] 🧠 Backend: Gemini Live")
+            jarvis = JarvisLive(ui)
+            try:
+                asyncio.run(jarvis.run())
+            except KeyboardInterrupt:
+                print("\n🔴 Shutting down...")
 
     threading.Thread(target=runner, daemon=True).start()
     ui.root.mainloop()
 
 if __name__ == "__main__":
+    _register_startup_windows()
     main()
