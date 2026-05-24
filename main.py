@@ -69,6 +69,7 @@ from actions.google_calendar   import google_calendar as gcal_action
 from actions.summarizer        import summarizer as summarizer_action
 from actions.pdf_summarizer    import pdf_summarizer as pdf_action
 from actions.chat_history      import chat_history as chat_history_action
+from actions.totp              import totp as totp_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -966,6 +967,26 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "totp",
+        "description": (
+            "Generate TOTP 2FA codes; add/list/delete saved secrets. "
+            "Secrets stored encrypted at ~/.config/jarvis/totp_secrets.json. "
+            "Trigger: 'Github TOTP kodi', '2FA kodni ber', 'authenticator kodi'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "get | add | list | delete"},
+                "name":   {"type": "STRING",
+                           "description": "Account name (e.g. 'Github', 'Google')"},
+                "secret": {"type": "STRING",
+                           "description": "Base32 TOTP secret (for add action)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "chat_history",
         "description": (
             "Show, search, save, or count the current conversation history. "
@@ -1618,8 +1639,12 @@ class JarvisLive:
                 result = r or "Done."
 
             elif name == "chat_history":
-                # JarvisLive has no persistent text history — return a note
                 result = "Suhbat tarixi faqat OpenAI rejimida mavjud."
+
+            elif name == "totp":
+                r = await loop.run_in_executor(
+                    None, lambda: totp_action(parameters=args, player=self.ui))
+                result = r or "Done."
 
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
@@ -2123,6 +2148,8 @@ class JarvisOpenAI:
             if name == "chat_history":
                 args["_history"] = self._history
                 return chat_history_action(parameters=args, player=self.ui) or "Done."
+            if name == "totp":
+                return totp_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

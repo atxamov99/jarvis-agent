@@ -167,6 +167,11 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+totp → generate TOTP 2FA codes or manage saved secrets. Trigger:
+  "[xizmat] TOTP kodi" / "2FA kodni ber" / "authenticator" → action="get", name="xizmat"
+  "TOTP qo'sh [nom] [secret]" → action="add", name=..., secret=...
+  "barcha TOTP kodlar" → action="list"
+  "[nom] TOTP ni o'chir" → action="delete", name=...
 chat_history → show, search, save, or count the current conversation. Trigger:
   "suhbat tarixini ko'rsat" / "avvalgi gaplarni ko'rsat" → action="show"
   "X deb nimaydi avval" / "suhbatda X ni qidir" → action="search", query="X"
