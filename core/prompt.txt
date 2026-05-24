@@ -167,6 +167,11 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+image_gen → generate AI images from a text prompt. Trigger:
+  "rasm yaratib ber: [tavsif]" → prompt="tavsif" (English prompts work best)
+  "DALL-E bilan surat chiz" → backend="dalle"
+  "bepul rasm" → backend="pollinations"
+  Auto-opens the image after generation; saves to ~/Pictures/JarvisAI/.
 ssh_control → run commands on remote servers via SSH; manage host profiles. Trigger:
   "serverda [buyruq] ishlat" → action="run", name="server", command="buyruq"
   "SSH host qo'sh [nom] [host] [user]" → action="add"

@@ -72,6 +72,7 @@ from actions.chat_history      import chat_history as chat_history_action
 from actions.totp              import totp as totp_action
 from actions.weather_extended  import weather_extended as weather_ext_action
 from actions.ssh_control       import ssh_control as ssh_action
+from actions.image_gen         import image_gen as image_gen_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -969,6 +970,26 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "image_gen",
+        "description": (
+            "Generate AI images from text description. Uses DALL-E 3 if OpenAI key is available, "
+            "otherwise Pollinations.ai (free, no key needed). Saves to ~/Pictures/JarvisAI/. "
+            "Trigger: 'rasm yaratib ber', 'surat chiz', 'AI rasm', 'DALL-E bilan'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "prompt":  {"type": "STRING",
+                            "description": "Image description in English for best results"},
+                "size":    {"type": "STRING",
+                            "description": "Image size: 1024x1024 (default) | 1792x1024 | 1024x1792"},
+                "backend": {"type": "STRING",
+                            "description": "auto | dalle | pollinations (default: auto)"},
+            },
+            "required": ["prompt"]
+        }
+    },
+    {
         "name": "ssh_control",
         "description": (
             "Execute commands on remote servers via SSH; manage saved host profiles. "
@@ -1706,6 +1727,11 @@ class JarvisLive:
                     None, lambda: ssh_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "image_gen":
+                r = await loop.run_in_executor(
+                    None, lambda: image_gen_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2214,6 +2240,8 @@ class JarvisOpenAI:
                 return weather_ext_action(parameters=args, player=self.ui) or "Done."
             if name == "ssh_control":
                 return ssh_action(parameters=args, player=self.ui) or "Done."
+            if name == "image_gen":
+                return image_gen_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
