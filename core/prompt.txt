@@ -167,6 +167,10 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+summarizer → summarize a web page or text via Gemini AI. Trigger:
+  "bu sahifani xulosa qil [URL]" → url="URL"
+  "bu matnni xulosa qil: [matn]" → text="matn"
+  language parameter: uz (default) | ru | en
 google_calendar → list, create, or delete Google Calendar events. Trigger:
   "kalendar voqealarini ko'rsat" / "bugun nima bor" → action="list"
   "7 kunlik jadval" → action="list", days=7

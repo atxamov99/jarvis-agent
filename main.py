@@ -66,6 +66,7 @@ from actions.voice_memo        import voice_memo as voice_memo_action
 from actions.ocr               import ocr as ocr_action
 from actions.calculator        import calculator as calculator_action
 from actions.google_calendar   import google_calendar as gcal_action
+from actions.summarizer        import summarizer as summarizer_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -963,6 +964,26 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "summarizer",
+        "description": (
+            "Summarize a web page URL or plain text using Gemini AI. "
+            "Trigger: 'bu sahifani xulosa qil', 'mana bu linkni o'qi', "
+            "'qisqacha tushuntir', 'bu matnni xulosa qil'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "url":      {"type": "STRING",
+                             "description": "Web page URL to fetch and summarize"},
+                "text":     {"type": "STRING",
+                             "description": "Plain text to summarize (alternative to url)"},
+                "language": {"type": "STRING",
+                             "description": "Summary language: uz (default) | ru | en"},
+            },
+            "required": []
+        }
+    },
+    {
         "name": "google_calendar",
         "description": (
             "List upcoming events, create new events, or delete events in Google Calendar. "
@@ -1544,6 +1565,11 @@ class JarvisLive:
                     None, lambda: gcal_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "summarizer":
+                r = await loop.run_in_executor(
+                    None, lambda: summarizer_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2039,6 +2065,8 @@ class JarvisOpenAI:
                 return calculator_action(parameters=args, player=self.ui) or "Done."
             if name == "google_calendar":
                 return gcal_action(parameters=args, player=self.ui) or "Done."
+            if name == "summarizer":
+                return summarizer_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
