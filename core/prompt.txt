@@ -167,6 +167,12 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+home_assistant → control smart home devices via Home Assistant API. Trigger:
+  "chiroqni yoq" / "[qurilma] yoq" → action="on", entity="light.room_name"
+  "[qurilma] o'chir" → action="off", entity=...
+  "smart uy qurilmalari" → action="list"
+  "[qurilma] holati" → action="status", entity=...
+  First-time setup: action="setup", url="http://ha.local:8123", token="..."
 macro_recorder → record keyboard/mouse actions and replay them. Trigger:
   "makro yozishni boshlash [nom]" → action="record", name="nom"
   "makroni to'xtat" → action="stop" (saves with given name)

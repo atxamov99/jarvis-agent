@@ -74,6 +74,7 @@ from actions.weather_extended  import weather_extended as weather_ext_action
 from actions.ssh_control       import ssh_control as ssh_action
 from actions.image_gen         import image_gen as image_gen_action
 from actions.macro_recorder    import macro_recorder as macro_action
+from actions.home_assistant    import home_assistant as ha_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -971,6 +972,31 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "home_assistant",
+        "description": (
+            "Control smart home devices via Home Assistant REST API. "
+            "Turn lights on/off, check device status, list all entities. "
+            "Trigger: 'chiroqni yoq', 'yoritgichni o'chir', 'smart uy qurilmalari', "
+            "'X qurilmasini yoq/o'chir'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "setup | list | on | off | toggle | status"},
+                "entity": {"type": "STRING",
+                           "description": "Entity ID (e.g. light.living_room, switch.fan)"},
+                "domain": {"type": "STRING",
+                           "description": "Filter entities by domain (e.g. light, switch, sensor)"},
+                "url":    {"type": "STRING",
+                           "description": "Home Assistant URL (for setup)"},
+                "token":  {"type": "STRING",
+                           "description": "Long-lived access token (for setup)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "macro_recorder",
         "description": (
             "Record keyboard and mouse actions as macros, then replay them. "
@@ -1760,6 +1786,11 @@ class JarvisLive:
                     None, lambda: macro_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "home_assistant":
+                r = await loop.run_in_executor(
+                    None, lambda: ha_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2272,6 +2303,8 @@ class JarvisOpenAI:
                 return image_gen_action(parameters=args, player=self.ui) or "Done."
             if name == "macro_recorder":
                 return macro_action(parameters=args, player=self.ui) or "Done."
+            if name == "home_assistant":
+                return ha_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
