@@ -67,6 +67,7 @@ from actions.ocr               import ocr as ocr_action
 from actions.calculator        import calculator as calculator_action
 from actions.google_calendar   import google_calendar as gcal_action
 from actions.summarizer        import summarizer as summarizer_action
+from actions.pdf_summarizer    import pdf_summarizer as pdf_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -964,6 +965,26 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "pdf_summarizer",
+        "description": (
+            "Extract text from a PDF file and summarize it using Gemini AI. "
+            "Trigger: 'bu PDFni xulosa qil', 'PDF faylni o'qi', "
+            "'mana bu hujjatni tushuntir', 'PDF dan nima deyilgan'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "path":      {"type": "STRING",
+                              "description": "Absolute or ~ path to the PDF file"},
+                "language":  {"type": "STRING",
+                              "description": "Summary language: uz (default) | ru | en"},
+                "max_pages": {"type": "INTEGER",
+                              "description": "Max pages to read (default: 20)"},
+            },
+            "required": ["path"]
+        }
+    },
+    {
         "name": "summarizer",
         "description": (
             "Summarize a web page URL or plain text using Gemini AI. "
@@ -1570,6 +1591,11 @@ class JarvisLive:
                     None, lambda: summarizer_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "pdf_summarizer":
+                r = await loop.run_in_executor(
+                    None, lambda: pdf_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2067,6 +2093,8 @@ class JarvisOpenAI:
                 return gcal_action(parameters=args, player=self.ui) or "Done."
             if name == "summarizer":
                 return summarizer_action(parameters=args, player=self.ui) or "Done."
+            if name == "pdf_summarizer":
+                return pdf_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

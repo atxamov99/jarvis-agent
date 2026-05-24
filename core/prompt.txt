@@ -167,6 +167,10 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+pdf_summarizer → extract and summarize text from a PDF file via Gemini. Trigger:
+  "bu PDFni xulosa qil [yo'l]" → path="/path/to/file.pdf"
+  "mana bu hujjatni o'qi" / "PDF dan nima deyilgan" → with file path
+  language: uz (default) | ru | en; max_pages default 20.
 summarizer → summarize a web page or text via Gemini AI. Trigger:
   "bu sahifani xulosa qil [URL]" → url="URL"
   "bu matnni xulosa qil: [matn]" → text="matn"
