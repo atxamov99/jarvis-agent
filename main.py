@@ -149,9 +149,9 @@ LIVE_MODEL = _load_live_model()
 
 # Noise gate — filters background noise, knocks, brief transients
 # Each frame = CHUNK_SIZE/SEND_SAMPLE_RATE = ~64 ms
-_GATE_OPEN_RMS    = 80     # RMS level required to consider audio "active"
+_GATE_OPEN_RMS    = 45     # RMS level required to consider audio "active" (lowered: catches quiet voices)
 _GATE_ATTACK      = 2      # frames (~128 ms) above threshold before gate opens
-_GATE_HOLD        = 28     # frames (~1.8 s) gate stays open after level drops
+_GATE_HOLD        = 45     # frames (~2.9 s) gate stays open after level drops (extended: don't cut mid-sentence)
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -1791,7 +1791,8 @@ class JarvisLive:
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
                         voice_name="Charon"
                     )
-                )
+                ),
+                language_code="uz-UZ",
             ),
         )
 
@@ -2795,6 +2796,15 @@ class JarvisOpenAI:
             tx = self._client.audio.transcriptions.create(
                 model="whisper-1",
                 file=buf,
+                language="uz",
+                prompt=(
+                    "Jarvis, yoq, o'chir, ochiq, yopiq, boshlash, to'xtat, ko'rsat, "
+                    "qidirish, yukla, saqla, o'chir, holat, tekshir, qo'sh, o'zgartir, "
+                    "vazifa, signal, eslatma, ob-havo, tarjima, hisob, parol, "
+                    "CPU, RAM, disk, batareya, wifi, ekran, fayl, papka, "
+                    "dollar, so'm, rubl, evro, YouTube, GitHub, Google, "
+                    "Jarvis yoq, Jarvis o'chir, Jarvis salom, Jarvis qil"
+                ),
             )
             text = tx.text.strip()
             print(f"[Whisper] → {text[:80]}")
