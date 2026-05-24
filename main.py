@@ -81,6 +81,7 @@ from actions.todo              import todo as todo_action
 from actions.currency          import currency as currency_action
 from actions.yt_downloader     import yt_downloader as ytdl_action
 from actions.screen_recorder   import screen_recorder as screenrec_action
+from actions.network_tools     import network_tools as network_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -1467,6 +1468,28 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "network_tools",
+        "description": (
+            "Network diagnostics: my public IP, IP geolocation lookup, ping, DNS resolve, port scan. "
+            "Trigger: 'mening IP manzilim', 'google.com ping', 'DNS tekshir', "
+            "'port skan', '8.8.8.8 haqida ma'lumot'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "myip | lookup | ping | dns | scan"},
+                "host":   {"type": "STRING",
+                           "description": "Hostname or IP (for ping/dns/scan/lookup)"},
+                "count":  {"type": "INTEGER",
+                           "description": "Ping packet count (default: 4)"},
+                "ports":  {"type": "STRING",
+                           "description": "Comma-separated ports to scan (default: common ports)"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -1962,6 +1985,11 @@ class JarvisLive:
             elif name == "screen_recorder":
                 r = await loop.run_in_executor(
                     None, lambda: screenrec_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "network_tools":
+                r = await loop.run_in_executor(
+                    None, lambda: network_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -2490,6 +2518,8 @@ class JarvisOpenAI:
                 return ytdl_action(parameters=args, player=self.ui) or "Done."
             if name == "screen_recorder":
                 return screenrec_action(parameters=args, player=self.ui) or "Done."
+            if name == "network_tools":
+                return network_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

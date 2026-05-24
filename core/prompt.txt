@@ -180,6 +180,14 @@ screen_recorder → record the screen to MP4 via ffmpeg x11grab. Trigger:
   "ekran yozuv holati" → action="status"
   "yozuvlar ro'yxati" → action="list"
   Saves to ~/Videos/Recordings/. Uses x11grab + libx264 ultrafast preset.
+network_tools → network diagnostics: IP, ping, DNS, port scan. Trigger:
+  "mening IP manzilim" → action="myip" (public IP + location)
+  "8.8.8.8 haqida ma'lumot" → action="lookup", host="8.8.8.8"
+  "google.com ping" → action="ping", host="google.com"
+  "google.com DNS" → action="dns", host="google.com"
+  "192.168.1.1 port skan" → action="scan", host="192.168.1.1"
+  "80,443 portlarni tekshir" → action="scan", ports="80,443"
+  Uses ipinfo.io for geolocation; stdlib socket for DNS/port scan; ping CLI.
 currency → real-time currency conversion (USD/EUR/RUB/UZS/GBP/CNY/TRY/KZT/AED...). Trigger:
   "100 dollar necha so'm" → amount=100, from="USD", to="UZS"
   "1 evro necha rubl" → from="EUR", to="RUB"
