@@ -85,6 +85,7 @@ from actions.network_tools     import network_tools as network_action
 from actions.hash_tool         import hash_tool as hash_action
 from actions.qr_code           import qr_code as qr_action
 from actions.focus_mode        import focus_mode as focus_action
+from actions.disk_manager      import disk_manager as disk_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -1560,6 +1561,28 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "disk_manager",
+        "description": (
+            "Disk usage analysis: partition overview, directory sizes, largest directories, "
+            "find large files. Trigger: 'disk holati', 'qaysi papka katta', "
+            "'100MB dan katta fayllar', 'uy papkasi hajmi'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "overview | usage | top | large"},
+                "path":   {"type": "STRING",
+                           "description": "Directory path (default: home directory)"},
+                "count":  {"type": "INTEGER",
+                           "description": "Number of results to show (default: 10)"},
+                "min_mb": {"type": "INTEGER",
+                           "description": "Minimum file size in MB for large action (default: 100)"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -2075,6 +2098,11 @@ class JarvisLive:
             elif name == "focus_mode":
                 r = await loop.run_in_executor(
                     None, lambda: focus_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "disk_manager":
+                r = await loop.run_in_executor(
+                    None, lambda: disk_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -2611,6 +2639,8 @@ class JarvisOpenAI:
                 return qr_action(parameters=args, player=self.ui) or "Done."
             if name == "focus_mode":
                 return focus_action(parameters=args, player=self.ui) or "Done."
+            if name == "disk_manager":
+                return disk_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

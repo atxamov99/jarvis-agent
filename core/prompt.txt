@@ -208,6 +208,13 @@ focus_mode → block distracting sites (YouTube/Twitter/Instagram/TikTok/Reddit)
   "fokusni o'chir" / "blokni olib tashla" → action="stop"
   "fokus holati" → action="status"
   Requires pkexec (GUI sudo) or passwordless sudo to write /etc/hosts.
+disk_manager → disk usage analysis: partitions, top directories, large files. Trigger:
+  "disk holati" / "disklar" → action="overview" (all mounted partitions)
+  "uy papkasi hajmi" → action="usage", path="~"
+  "qaysi papka katta" → action="top" (top 10 dirs in home)
+  "Downloads da katta papkalar" → action="top", path="~/Downloads"
+  "100MB dan katta fayllar" → action="large", min_mb=100
+  Uses psutil for partition info; du/find for directory analysis.
 currency → real-time currency conversion (USD/EUR/RUB/UZS/GBP/CNY/TRY/KZT/AED...). Trigger:
   "100 dollar necha so'm" → amount=100, from="USD", to="UZS"
   "1 evro necha rubl" → from="EUR", to="RUB"
