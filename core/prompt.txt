@@ -160,6 +160,13 @@ clipboard → read/write/history of system clipboard.
   • "clipboard tarixini ko'rsat / oxirgi nusxalar" → action="history" (shows last 10)
   • "clipboard'ni tozala" → action="clear"
 system_info → CPU, RAM, disk, battery, network, uptime stats. Trigger: "batareya qancha", "RAM holat", "disk to'lganmi", "tezligi qancha", "ish vaqti".
+notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
+  "eslatma yoz [mavzu]: [mazmun]" → action="create"
+  "eslatmalarimni ko'rsat / ro'yxati" → action="list"
+  "[mavzu] notasini o'qi" → action="read"
+  "eslatmada [so'z] ni qidir" → action="search"
+  "[mavzu] notasiga qo'sh: [matn]" → action="append"
+  "[mavzu] notasini o'chir" → action="delete"
 terminal_control → run shell commands, git operations (status/commit/push/pull/log), list directories, check processes. Trigger: "git status qil", "shu commandni ishlat", "terminalda X bajar", "git push qil", "fayllarni ko'rsat".
 music_control → control music/media (Spotify, VLC, YouTube). Actions: play/pause, next/previous, volume, status, open Spotify. Trigger: "musiqa qoy", "to'xtat", "keyingisi", "ovoz balandlatib qoy", "Spotify och".
 gaming_control → game features: launch/close games, gaming mode (performance), CPU/GPU stats, open Steam. Trigger: "Minecraft ishga tushir", "qaysi o'yin ochiq", "gaming mode yoq", "Steam och".

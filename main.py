@@ -55,6 +55,7 @@ from actions.terminal_control  import terminal_control
 from actions.music_control     import music_control
 from actions.gaming_control    import gaming_control
 from actions.clap_detector     import ClapDetector
+from actions.notes             import notes as notes_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -129,6 +130,25 @@ def _get_openai_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
         d = json.load(f)
     return d.get("openai_api_key", "")
+
+
+def _openai_quota_ok() -> bool:
+    """Quick TTS probe — confirms billing is active. False on 429/insufficient_quota."""
+    key = _get_openai_api_key()
+    if not key:
+        return False
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=key, timeout=10.0)
+        client.audio.speech.create(model="tts-1", voice="onyx", input=".", response_format="pcm")
+        return True
+    except Exception as e:
+        msg = str(e).lower()
+        if "insufficient_quota" in msg or "429" in msg or "exceeded" in msg:
+            print(f"[JARVIS] ⚠️ OpenAI quota exhausted — falling back to Gemini Live")
+            return False
+        # Any other error: assume OK, will surface during use
+        return True
 
 def _to_openai_tools(gemini_tools: list) -> list:
     """Convert Gemini tool declarations to OpenAI function-calling format."""
@@ -872,6 +892,26 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "notes",
+        "description": (
+            "Create, read, list, search, append to, or delete personal notes. "
+            "Notes are saved as markdown files in ~/Notes/. "
+            "Trigger: 'eslatma yoz', 'nota qo'sh', 'eslatmalarni ko'rsat', "
+            "'X haqida nota', 'eslatmalarimda X ni qidir', 'notani o'chir'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":  {"type": "STRING",
+                            "description": "create | read | list | search | append | delete"},
+                "title":   {"type": "STRING", "description": "Note title"},
+                "content": {"type": "STRING", "description": "Note content (for create/append)"},
+                "query":   {"type": "STRING", "description": "Search keyword (for search)"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -1242,6 +1282,10 @@ class JarvisLive:
                 r = await loop.run_in_executor(None, lambda: gaming_control(**args))
                 result = r or "Done."
 
+            elif name == "notes":
+                r = await loop.run_in_executor(None, lambda: notes_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -1560,22 +1604,46 @@ class JarvisOpenAI:
 
     def _speak_bg(self, text: str):
         try:
-            # OpenAI TTS → PCM (24kHz, 16-bit, mono) — no format conversion needed
             response = self._client.audio.speech.create(
                 model="tts-1",
-                voice="onyx",           # deep, authoritative — best for JARVIS
+                voice="onyx",
                 input=text,
-                response_format="pcm",  # raw signed-16 LE at 24 kHz
+                response_format="pcm",
             )
             pcm = response.content
             arr = np.frombuffer(pcm, dtype=np.int16)
             sd.play(arr, samplerate=24000)
             sd.wait()
         except Exception as e:
-            print(f"[TTS] Error: {e}")
-            traceback.print_exc()
+            err_str = str(e)
+            if "insufficient_quota" in err_str or "429" in err_str:
+                print(f"[TTS] OpenAI quota exceeded — falling back to edge-tts")
+                self._speak_edge_tts(text)
+            else:
+                print(f"[TTS] Error: {e}")
         finally:
             self.set_speaking(False)
+
+    def _speak_edge_tts(self, text: str):
+        """Free fallback when OpenAI TTS quota is exhausted."""
+        try:
+            import edge_tts, soundfile as sf, io, asyncio as _aio, tempfile, os as _os
+            voice = "en-US-GuyNeural"
+            async def _gen(path):
+                communicate = edge_tts.Communicate(text, voice)
+                await communicate.save(path)
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
+                tmp_path = tf.name
+            try:
+                _aio.run(_gen(tmp_path))
+                data, sr = sf.read(tmp_path, dtype="int16")
+                sd.play(data, samplerate=sr)
+                sd.wait()
+            finally:
+                try: _os.unlink(tmp_path)
+                except Exception: pass
+        except Exception as e:
+            print(f"[TTS] edge-tts fallback failed: {e}")
 
     def speak_error(self, tool_name: str, error: str):
         self.ui.write_log(f"ERR: {tool_name} — {str(error)[:120]}")
@@ -1691,6 +1759,8 @@ class JarvisOpenAI:
                 return music_control(**args) or "Done."
             if name == "gaming_control":
                 return gaming_control(**args) or "Done."
+            if name == "notes":
+                return notes_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
@@ -1951,9 +2021,8 @@ def main():
 
     def runner():
         ui.wait_for_api_key()
-        # Use GPT-4o pipeline if openai_api_key is set, else fall back to Gemini Live
-        oai_key = _get_openai_api_key()
-        if oai_key:
+        # Use GPT-4o pipeline if openai_api_key is set AND has quota, else Gemini Live
+        if _get_openai_api_key() and _openai_quota_ok():
             print("[JARVIS] 🧠 Backend: GPT-4o (OpenAI)")
             jarvis = JarvisOpenAI(ui)
             try:
