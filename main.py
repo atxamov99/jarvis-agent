@@ -68,6 +68,7 @@ from actions.calculator        import calculator as calculator_action
 from actions.google_calendar   import google_calendar as gcal_action
 from actions.summarizer        import summarizer as summarizer_action
 from actions.pdf_summarizer    import pdf_summarizer as pdf_action
+from actions.chat_history      import chat_history as chat_history_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -965,6 +966,26 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "chat_history",
+        "description": (
+            "Show, search, save, or count the current conversation history. "
+            "Trigger: 'suhbat tarixini ko'rsat', 'X deb nimaydi avval', "
+            "'tarixni saqlash', 'nechta savol berdim'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "show | search | save | count"},
+                "query":  {"type": "STRING",
+                           "description": "Search term (for search action)"},
+                "count":  {"type": "INTEGER",
+                           "description": "Number of recent exchanges to show (default: 10)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "pdf_summarizer",
         "description": (
             "Extract text from a PDF file and summarize it using Gemini AI. "
@@ -1596,6 +1617,10 @@ class JarvisLive:
                     None, lambda: pdf_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "chat_history":
+                # JarvisLive has no persistent text history — return a note
+                result = "Suhbat tarixi faqat OpenAI rejimida mavjud."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2095,6 +2120,9 @@ class JarvisOpenAI:
                 return summarizer_action(parameters=args, player=self.ui) or "Done."
             if name == "pdf_summarizer":
                 return pdf_action(parameters=args, player=self.ui) or "Done."
+            if name == "chat_history":
+                args["_history"] = self._history
+                return chat_history_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

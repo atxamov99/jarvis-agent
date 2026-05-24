@@ -167,6 +167,11 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+chat_history → show, search, save, or count the current conversation. Trigger:
+  "suhbat tarixini ko'rsat" / "avvalgi gaplarni ko'rsat" → action="show"
+  "X deb nimaydi avval" / "suhbatda X ni qidir" → action="search", query="X"
+  "suhbatni saqlash" → action="save"
+  "nechta savol berdim" → action="count"
 pdf_summarizer → extract and summarize text from a PDF file via Gemini. Trigger:
   "bu PDFni xulosa qil [yo'l]" → path="/path/to/file.pdf"
   "mana bu hujjatni o'qi" / "PDF dan nima deyilgan" → with file path
