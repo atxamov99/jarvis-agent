@@ -201,6 +201,13 @@ qr_code → generate QR codes from text/URL; decode QR images; list saved codes.
   "QR kodini o'qi: [fayl]" → action="decode", file="/path/to/img.png"
   "QR kodlar ro'yxati" → action="list"
   Saves to ~/Pictures/QRCodes/. Auto-opens generated QR with xdg-open.
+focus_mode → block distracting sites (YouTube/Twitter/Instagram/TikTok/Reddit) via /etc/hosts. Trigger:
+  "fokus rejimini yoq" / "saytlarni blokla" → action="start"
+  "30 daqiqa fokus rejimi" → action="start", duration=30
+  "faqat youtube va tiktokni blokla" → action="start", sites="youtube.com,tiktok.com"
+  "fokusni o'chir" / "blokni olib tashla" → action="stop"
+  "fokus holati" → action="status"
+  Requires pkexec (GUI sudo) or passwordless sudo to write /etc/hosts.
 currency → real-time currency conversion (USD/EUR/RUB/UZS/GBP/CNY/TRY/KZT/AED...). Trigger:
   "100 dollar necha so'm" → amount=100, from="USD", to="UZS"
   "1 evro necha rubl" → from="EUR", to="RUB"

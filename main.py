@@ -84,6 +84,7 @@ from actions.screen_recorder   import screen_recorder as screenrec_action
 from actions.network_tools     import network_tools as network_action
 from actions.hash_tool         import hash_tool as hash_action
 from actions.qr_code           import qr_code as qr_action
+from actions.focus_mode        import focus_mode as focus_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -1538,6 +1539,27 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "focus_mode",
+        "description": (
+            "Block distracting websites (YouTube, Twitter, Instagram, TikTok, Reddit...) "
+            "by editing /etc/hosts. Requires pkexec or sudo. "
+            "Trigger: 'fokus rejimini yoq', 'saytlarni blokla', 'fokusni o'chir', "
+            "'30 daqiqa fokus rejimi'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":   {"type": "STRING",
+                             "description": "start | stop | status | list"},
+                "duration": {"type": "INTEGER",
+                             "description": "Auto-stop after N minutes (0 = until manual stop)"},
+                "sites":    {"type": "STRING",
+                             "description": "Comma-separated domains to block (default: 16 popular sites)"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -2048,6 +2070,11 @@ class JarvisLive:
             elif name == "qr_code":
                 r = await loop.run_in_executor(
                     None, lambda: qr_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "focus_mode":
+                r = await loop.run_in_executor(
+                    None, lambda: focus_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -2582,6 +2609,8 @@ class JarvisOpenAI:
                 return hash_action(parameters=args, player=self.ui) or "Done."
             if name == "qr_code":
                 return qr_action(parameters=args, player=self.ui) or "Done."
+            if name == "focus_mode":
+                return focus_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
