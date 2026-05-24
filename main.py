@@ -75,6 +75,7 @@ from actions.ssh_control       import ssh_control as ssh_action
 from actions.image_gen         import image_gen as image_gen_action
 from actions.macro_recorder    import macro_recorder as macro_action
 from actions.home_assistant    import home_assistant as ha_action
+from actions.system_monitor    import system_monitor as sysmon_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -972,6 +973,31 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "system_monitor",
+        "description": (
+            "Real-time CPU, RAM, disk, network, battery stats and process list. "
+            "Can set threshold alerts (notify when CPU/RAM > N%). "
+            "Trigger: 'CPU qancha', 'RAM holati', 'disk joy', 'top jarayonlar', "
+            "'batareya zaryadi', 'tizim holati'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":        {"type": "STRING",
+                                  "description": "status | cpu | ram | disk | top | battery | alert"},
+                "count":         {"type": "INTEGER",
+                                  "description": "Number of top processes to show (default: 10)"},
+                "cpu_threshold": {"type": "INTEGER",
+                                  "description": "CPU % alert threshold (default: 85)"},
+                "ram_threshold": {"type": "INTEGER",
+                                  "description": "RAM % alert threshold (default: 85)"},
+                "interval":      {"type": "INTEGER",
+                                  "description": "Alert check interval in seconds (default: 30)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "home_assistant",
         "description": (
             "Control smart home devices via Home Assistant REST API. "
@@ -1791,6 +1817,11 @@ class JarvisLive:
                     None, lambda: ha_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "system_monitor":
+                r = await loop.run_in_executor(
+                    None, lambda: sysmon_action(parameters=args, player=self.ui, speak=self.speak))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2305,6 +2336,8 @@ class JarvisOpenAI:
                 return macro_action(parameters=args, player=self.ui) or "Done."
             if name == "home_assistant":
                 return ha_action(parameters=args, player=self.ui) or "Done."
+            if name == "system_monitor":
+                return sysmon_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

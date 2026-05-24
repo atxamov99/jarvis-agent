@@ -167,6 +167,12 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+system_monitor → real-time CPU, RAM, disk, network, battery, top processes. Trigger:
+  "tizim holati" / "CPU qancha" / "RAM holati" → action="status"
+  "top jarayonlar" → action="top"
+  "disk joy" → action="disk"
+  "batareya zaryadi" → action="battery"
+  "CPU 90% dan oshsa ogohlantir" → action="alert", cpu_threshold=90
 home_assistant → control smart home devices via Home Assistant API. Trigger:
   "chiroqni yoq" / "[qurilma] yoq" → action="on", entity="light.room_name"
   "[qurilma] o'chir" → action="off", entity=...
