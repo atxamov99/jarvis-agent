@@ -167,6 +167,12 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+macro_recorder → record keyboard/mouse actions and replay them. Trigger:
+  "makro yozishni boshlash [nom]" → action="record", name="nom"
+  "makroni to'xtat" → action="stop" (saves with given name)
+  "[nom] makrosini ijro et" → action="play", name="nom"
+  "makrolarni ko'rsat" → action="list"
+  speed=2.0 for 2x faster playback; seconds=30 for auto-stop.
 image_gen → generate AI images from a text prompt. Trigger:
   "rasm yaratib ber: [tavsif]" → prompt="tavsif" (English prompts work best)
   "DALL-E bilan surat chiz" → backend="dalle"

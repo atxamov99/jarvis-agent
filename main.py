@@ -73,6 +73,7 @@ from actions.totp              import totp as totp_action
 from actions.weather_extended  import weather_extended as weather_ext_action
 from actions.ssh_control       import ssh_control as ssh_action
 from actions.image_gen         import image_gen as image_gen_action
+from actions.macro_recorder    import macro_recorder as macro_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -970,6 +971,28 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "macro_recorder",
+        "description": (
+            "Record keyboard and mouse actions as macros, then replay them. "
+            "Trigger: 'makro yozishni boshlash', 'makroni to'xtat va saqlash', "
+            "'makroni ijro et', 'makrolarni ko'rsat'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":  {"type": "STRING",
+                            "description": "record | stop | play | list | delete"},
+                "name":    {"type": "STRING",
+                            "description": "Macro name (for stop/play/delete)"},
+                "seconds": {"type": "NUMBER",
+                            "description": "Auto-stop recording after N seconds (optional)"},
+                "speed":   {"type": "NUMBER",
+                            "description": "Playback speed multiplier (default: 1.0, 2.0 = 2x faster)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "image_gen",
         "description": (
             "Generate AI images from text description. Uses DALL-E 3 if OpenAI key is available, "
@@ -1732,6 +1755,11 @@ class JarvisLive:
                     None, lambda: image_gen_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "macro_recorder":
+                r = await loop.run_in_executor(
+                    None, lambda: macro_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2242,6 +2270,8 @@ class JarvisOpenAI:
                 return ssh_action(parameters=args, player=self.ui) or "Done."
             if name == "image_gen":
                 return image_gen_action(parameters=args, player=self.ui) or "Done."
+            if name == "macro_recorder":
+                return macro_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

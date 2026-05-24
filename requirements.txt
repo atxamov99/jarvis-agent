@@ -33,3 +33,4 @@ speedtest-cli
 google-auth-oauthlib
 pypdf
 pyotp
+pynput
