@@ -167,6 +167,11 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+pomodoro → Pomodoro timer: start work/break cycle, stop, or check remaining time. Trigger:
+  "pomodoro boshlash" / "25 daqiqa ish" / "taymer boshlash" → action="start" (work_minutes=25, break_minutes=5)
+  "pomodorani to'xtat" / "taymerni bekor qil" → action="stop"
+  "qancha vaqt qoldi" / "pomodoro holati" → action="status"
+  Custom: "40 daqiqa ish, 10 dam" → work_minutes=40, break_minutes=10
 terminal_control → run shell commands, git operations (status/commit/push/pull/log), list directories, check processes. Trigger: "git status qil", "shu commandni ishlat", "terminalda X bajar", "git push qil", "fayllarni ko'rsat".
 music_control → control music/media (Spotify, VLC, YouTube). Actions: play/pause, next/previous, volume, status, open Spotify. Trigger: "musiqa qoy", "to'xtat", "keyingisi", "ovoz balandlatib qoy", "Spotify och".
 gaming_control → game features: launch/close games, gaming mode (performance), CPU/GPU stats, open Steam. Trigger: "Minecraft ishga tushir", "qaysi o'yin ochiq", "gaming mode yoq", "Steam och".
