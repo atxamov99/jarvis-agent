@@ -167,6 +167,12 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+voice_memo → record, save, list, play, or delete voice memos (WAV in ~/VoiceMemos/). Trigger:
+  "ovoz yoz [N soniya]" → action="record", seconds=N (default 30)
+  "yozishni to'xtat [nom]" → action="stop", name="nom"
+  "ovoz yozuvlarini ko'rsat" → action="list"
+  "[nom] ovozini o'yna" → action="play", name="nom"
+  "[nom] ovoz yozuvini o'chir" → action="delete", name="nom"
 wifi_control → list nearby WiFi networks, connect/disconnect, turn WiFi on/off. Trigger:
   "WiFi tarmoqlarini ko'rsat" / "qaysi tarmoqlar bor" → action="list"
   "qaysi WiFiga ulangan" → action="status"

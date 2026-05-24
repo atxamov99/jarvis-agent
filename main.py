@@ -62,6 +62,7 @@ from actions.password_gen      import password_gen as password_gen_action
 from actions.archiver          import archiver as archiver_action
 from actions.speedtest         import speedtest as speedtest_action
 from actions.wifi_control      import wifi_control as wifi_control_action
+from actions.voice_memo        import voice_memo as voice_memo_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -959,6 +960,26 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "voice_memo",
+        "description": (
+            "Record, save, list, play, or delete voice memos (WAV files in ~/VoiceMemos/). "
+            "Trigger: 'ovoz yoz', 'yozishni to'xtat', 'ovoz yozuvlarini ko'rsat', "
+            "'X yozuvni o'yna', 'ovoz yozuvini o'chir'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":  {"type": "STRING",
+                            "description": "record | stop | list | play | delete"},
+                "seconds": {"type": "INTEGER",
+                            "description": "Recording duration in seconds (default: 30)"},
+                "name":    {"type": "STRING",
+                            "description": "Memo name (for stop/play/delete)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "wifi_control",
         "description": (
             "List WiFi networks, connect/disconnect, turn WiFi on/off, check status. "
@@ -1434,6 +1455,11 @@ class JarvisLive:
             elif name == "wifi_control":
                 r = await loop.run_in_executor(
                     None, lambda: wifi_control_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "voice_memo":
+                r = await loop.run_in_executor(
+                    None, lambda: voice_memo_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -1923,6 +1949,8 @@ class JarvisOpenAI:
                 return speedtest_action(parameters=args, player=self.ui) or "Done."
             if name == "wifi_control":
                 return wifi_control_action(parameters=args, player=self.ui) or "Done."
+            if name == "voice_memo":
+                return voice_memo_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
