@@ -87,6 +87,8 @@ from actions.qr_code           import qr_code as qr_action
 from actions.focus_mode        import focus_mode as focus_action
 from actions.disk_manager      import disk_manager as disk_action
 from actions.cron_manager      import cron_manager as cron_action
+from actions.voice_auth        import voice_auth as voice_auth_action
+import core.speaker_verifier as speaker_verifier
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -1606,6 +1608,27 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "voice_auth",
+        "description": (
+            "Enroll the owner's voice profile so JARVIS only responds to them. "
+            "Once enrolled, other people's voices are silently ignored. "
+            "Trigger: 'ovozimni esla', 'voice enroll', 'ovoz profili holati', "
+            "'ovoz profilini o'chir', 'ovoz testini qil'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":    {"type": "STRING",
+                              "description": "enroll | test | reset | status | threshold"},
+                "seconds":   {"type": "INTEGER",
+                              "description": "Enrollment duration in seconds (default: 15, min: 5, max: 60)"},
+                "threshold": {"type": "NUMBER",
+                              "description": "Log-likelihood threshold (default: -25.0, higher = stricter)"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -2134,6 +2157,11 @@ class JarvisLive:
                     None, lambda: cron_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "voice_auth":
+                r = await loop.run_in_executor(
+                    None, lambda: voice_auth_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2185,7 +2213,14 @@ class JarvisLive:
         print("[JARVIS] 🎤 Mic started")
         loop = asyncio.get_event_loop()
 
+        # Speaker pre-verification buffer (accumulated before streaming to Gemini)
+        _sv_pre_buf:   list  = []   # raw PCM chunks collected before verify
+        _sv_verified:  bool  = False
+        _sv_rejected:  bool  = False
+        _SV_PRE_FRAMES = 22  # ~22 * 64ms ≈ 1.4s before running verify
+
         def callback(indata, frames, time_info, status):
+            nonlocal _sv_pre_buf, _sv_verified, _sv_rejected
             with self._speaking_lock:
                 jarvis_speaking = self._is_speaking
 
@@ -2214,16 +2249,40 @@ class JarvisLive:
                 if rms >= _GATE_OPEN_RMS:
                     self._gate_attack_count += 1
                     if self._gate_attack_count >= _GATE_ATTACK:
-                        self._gate_open = True
+                        # Gate wants to open — check speaker first
+                        if not _sv_verified and not _sv_rejected:
+                            _sv_pre_buf.append(indata.tobytes())
+                            if len(_sv_pre_buf) >= _SV_PRE_FRAMES:
+                                raw = b"".join(_sv_pre_buf)
+                                if speaker_verifier.verify(raw, SEND_SAMPLE_RATE):
+                                    _sv_verified = True
+                                    self._gate_open = True
+                                    # Flush pre-buffer to Gemini
+                                    for chunk in _sv_pre_buf:
+                                        loop.call_soon_threadsafe(
+                                            self.out_queue.put_nowait,
+                                            {"data": chunk, "mime_type": "audio/pcm"},
+                                        )
+                                    _sv_pre_buf = []
+                                else:
+                                    print("[SpeakerVerifier] ❌ Rejected — unknown speaker (Live)")
+                                    _sv_rejected = True
+                                    _sv_pre_buf  = []
+                        elif _sv_verified:
+                            self._gate_open = True
                     self._gate_hold_count = _GATE_HOLD
                 else:
                     self._gate_attack_count = 0
                     if self._gate_hold_count > 0:
                         self._gate_hold_count -= 1
                     else:
+                        # Gate closes — reset per-utterance speaker state
                         self._gate_open = False
+                        _sv_pre_buf  = []
+                        _sv_verified = False
+                        _sv_rejected = False
 
-                if self._gate_open:
+                if self._gate_open and _sv_verified:
                     loop.call_soon_threadsafe(
                         self.out_queue.put_nowait,
                         {"data": indata.tobytes(), "mime_type": "audio/pcm"}
@@ -2672,6 +2731,8 @@ class JarvisOpenAI:
                 return disk_action(parameters=args, player=self.ui) or "Done."
             if name == "cron_manager":
                 return cron_action(parameters=args, player=self.ui) or "Done."
+            if name == "voice_auth":
+                return voice_auth_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
@@ -2784,6 +2845,14 @@ class JarvisOpenAI:
         try:
             import io, wave
             raw = b"".join(audio_chunks)
+
+            # Speaker verification — reject if not owner's voice
+            if not speaker_verifier.verify(raw, SEND_SAMPLE_RATE):
+                print("[SpeakerVerifier] ❌ Rejected — unknown speaker")
+                if not self.ui.muted:
+                    self.ui.set_state("LISTENING")
+                return
+
             buf = io.BytesIO()
             with wave.open(buf, "wb") as wf:
                 wf.setnchannels(CHANNELS)
@@ -2915,6 +2984,7 @@ def main():
         print("[JARVIS] Already running — focused existing window.")
         return
 
+    speaker_verifier.load_profile()
     ui = JarvisUI("face.png")
 
     def _on_double_clap():
