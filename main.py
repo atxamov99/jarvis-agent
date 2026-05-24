@@ -71,6 +71,7 @@ from actions.pdf_summarizer    import pdf_summarizer as pdf_action
 from actions.chat_history      import chat_history as chat_history_action
 from actions.totp              import totp as totp_action
 from actions.weather_extended  import weather_extended as weather_ext_action
+from actions.ssh_control       import ssh_control as ssh_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -968,6 +969,34 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "ssh_control",
+        "description": (
+            "Execute commands on remote servers via SSH; manage saved host profiles. "
+            "Trigger: 'serverda X buyrug'ini ishlat', 'SSH orqali X bajar', "
+            "'remote server holati', 'SSH host qo'sh'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":  {"type": "STRING",
+                            "description": "run | add | list | delete"},
+                "name":    {"type": "STRING",
+                            "description": "Saved host name (profile)"},
+                "command": {"type": "STRING",
+                            "description": "Shell command to execute remotely"},
+                "host":    {"type": "STRING",
+                            "description": "IP or hostname (for direct connection or add)"},
+                "user":    {"type": "STRING",
+                            "description": "SSH username"},
+                "port":    {"type": "INTEGER",
+                            "description": "SSH port (default: 22)"},
+                "key":     {"type": "STRING",
+                            "description": "Path to SSH private key (optional)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "weather_extended",
         "description": (
             "Get real-time weather data with temperature, humidity, wind, precipitation. "
@@ -1672,6 +1701,11 @@ class JarvisLive:
                     None, lambda: weather_ext_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "ssh_control":
+                r = await loop.run_in_executor(
+                    None, lambda: ssh_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2178,6 +2212,8 @@ class JarvisOpenAI:
                 return totp_action(parameters=args, player=self.ui) or "Done."
             if name == "weather_extended":
                 return weather_ext_action(parameters=args, player=self.ui) or "Done."
+            if name == "ssh_control":
+                return ssh_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
