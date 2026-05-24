@@ -63,6 +63,7 @@ from actions.archiver          import archiver as archiver_action
 from actions.speedtest         import speedtest as speedtest_action
 from actions.wifi_control      import wifi_control as wifi_control_action
 from actions.voice_memo        import voice_memo as voice_memo_action
+from actions.ocr               import ocr as ocr_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -960,6 +961,25 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "ocr",
+        "description": (
+            "Extract text from screen or image using Gemini Vision (OCR). "
+            "Can also translate or summarize the extracted text. "
+            "Trigger: 'ekrandan matn o'qi', 'skrinshotdagi matnni ko'rsat', "
+            "'bu rasmda nima yozilgan', 'ekranni o'qi'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "mode":       {"type": "STRING",
+                               "description": "extract | translate | summarize | describe (default: extract)"},
+                "image_path": {"type": "STRING",
+                               "description": "Path to image file (optional; takes screenshot if omitted)"},
+            },
+            "required": []
+        }
+    },
+    {
         "name": "voice_memo",
         "description": (
             "Record, save, list, play, or delete voice memos (WAV files in ~/VoiceMemos/). "
@@ -1462,6 +1482,11 @@ class JarvisLive:
                     None, lambda: voice_memo_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "ocr":
+                r = await loop.run_in_executor(
+                    None, lambda: ocr_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -1951,6 +1976,8 @@ class JarvisOpenAI:
                 return wifi_control_action(parameters=args, player=self.ui) or "Done."
             if name == "voice_memo":
                 return voice_memo_action(parameters=args, player=self.ui) or "Done."
+            if name == "ocr":
+                return ocr_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

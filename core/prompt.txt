@@ -167,6 +167,12 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+ocr → extract text from screen or image via Gemini Vision. Trigger:
+  "ekrandan matn o'qi" / "skrinshotdagi matnni ko'rsat" / "bu rasmda nima yozilgan" → mode="extract"
+  "ekrandagi matnni tarjima qil" → mode="translate"
+  "ekrandagi matnni xulosa qil" → mode="summarize"
+  "ekranni tasvirla" → mode="describe"
+  image_path parameter: if user provides a file path; otherwise takes a screenshot automatically.
 voice_memo → record, save, list, play, or delete voice memos (WAV in ~/VoiceMemos/). Trigger:
   "ovoz yoz [N soniya]" → action="record", seconds=N (default 30)
   "yozishni to'xtat [nom]" → action="stop", name="nom"
