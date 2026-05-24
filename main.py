@@ -80,6 +80,7 @@ from actions.alarm             import alarm as alarm_action
 from actions.todo              import todo as todo_action
 from actions.currency          import currency as currency_action
 from actions.yt_downloader     import yt_downloader as ytdl_action
+from actions.screen_recorder   import screen_recorder as screenrec_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -1446,6 +1447,26 @@ TOOL_DECLARATIONS = [
             "required": []
         }
     },
+    {
+        "name": "screen_recorder",
+        "description": (
+            "Record the screen to MP4 via ffmpeg x11grab. "
+            "Trigger: 'ekranni yozishni boshlash', 'yozuvni to'xtat', "
+            "'ekran yozuv holati', 'yozuvlar ro'yxati'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "start | stop | status | list"},
+                "fps":    {"type": "INTEGER",
+                           "description": "Frame rate (default: 30)"},
+                "audio":  {"type": "BOOLEAN",
+                           "description": "Record system audio via PulseAudio (default: false)"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -1936,6 +1957,11 @@ class JarvisLive:
             elif name == "yt_downloader":
                 r = await loop.run_in_executor(
                     None, lambda: ytdl_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "screen_recorder":
+                r = await loop.run_in_executor(
+                    None, lambda: screenrec_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -2462,6 +2488,8 @@ class JarvisOpenAI:
                 return currency_action(parameters=args, player=self.ui) or "Done."
             if name == "yt_downloader":
                 return ytdl_action(parameters=args, player=self.ui) or "Done."
+            if name == "screen_recorder":
+                return screenrec_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

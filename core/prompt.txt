@@ -173,6 +173,13 @@ yt_downloader → download YouTube videos (MP4) or audio (MP3) via yt-dlp. Trigg
   "faqat musiqa sifatida yukla [URL]" → mode="audio" (MP3)
   "video haqida ma'lumot [URL]" → mode="info" (title, duration, views)
   Saves to ~/Downloads/YouTube/.
+screen_recorder → record the screen to MP4 via ffmpeg x11grab. Trigger:
+  "ekranni yozishni boshlash" / "ekranni yoz" → action="start" (30fps default)
+  "audio bilan yoz" → action="start", audio=true
+  "yozuvni to'xtat" / "saqlash" → action="stop"
+  "ekran yozuv holati" → action="status"
+  "yozuvlar ro'yxati" → action="list"
+  Saves to ~/Videos/Recordings/. Uses x11grab + libx264 ultrafast preset.
 currency → real-time currency conversion (USD/EUR/RUB/UZS/GBP/CNY/TRY/KZT/AED...). Trigger:
   "100 dollar necha so'm" → amount=100, from="USD", to="UZS"
   "1 evro necha rubl" → from="EUR", to="RUB"
