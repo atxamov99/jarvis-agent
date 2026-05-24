@@ -522,6 +522,97 @@ def shutdown_computer():
     else:
         subprocess.run(["systemctl", "poweroff"], capture_output=True)
 
+
+def focus_window(title: str = ""):
+    """Focus a window whose title contains `title` (xdotool on Linux)."""
+    if not title:
+        return
+    if _OS == "Linux" and shutil.which("xdotool"):
+        r = subprocess.run(
+            ["xdotool", "search", "--name", title],
+            capture_output=True, text=True, timeout=5,
+        )
+        wids = [w.strip() for w in r.stdout.splitlines() if w.strip()]
+        if wids:
+            subprocess.run(["xdotool", "windowfocus", "--sync", wids[0]], timeout=3)
+            subprocess.run(["xdotool", "windowraise", wids[0]], timeout=3)
+    elif _OS == "Darwin":
+        subprocess.run(
+            ["osascript", "-e",
+             f'tell application "{title}" to activate'],
+            capture_output=True,
+        )
+    else:
+        pyautogui.hotkey("alt", "tab")
+
+
+def window_move(x: int = 0, y: int = 0):
+    """Move the active window to (x, y) on screen using xdotool."""
+    if _OS == "Linux" and shutil.which("xdotool"):
+        wid_r = subprocess.run(
+            ["xdotool", "getactivewindow"],
+            capture_output=True, text=True, timeout=3,
+        )
+        wid = wid_r.stdout.strip()
+        if wid:
+            subprocess.run(["xdotool", "windowmove", wid, str(x), str(y)], timeout=3)
+
+
+def window_resize(width: int = 800, height: int = 600):
+    """Resize the active window to width×height using xdotool."""
+    if _OS == "Linux" and shutil.which("xdotool"):
+        wid_r = subprocess.run(
+            ["xdotool", "getactivewindow"],
+            capture_output=True, text=True, timeout=3,
+        )
+        wid = wid_r.stdout.strip()
+        if wid:
+            subprocess.run(
+                ["xdotool", "windowsize", wid, str(width), str(height)],
+                timeout=3,
+            )
+
+
+def dismiss_notifications():
+    """Dismiss system notification popups (Escape key, then Super+V to clear all on GNOME)."""
+    pyautogui.press("escape")
+    if _OS == "Linux":
+        # GNOME notification center toggle — clears pending
+        try:
+            subprocess.run(
+                ["gdbus", "call", "--session",
+                 "--dest", "org.gnome.Shell",
+                 "--object-path", "/org/gnome/Shell",
+                 "--method", "org.gnome.Shell.Eval",
+                 "Main.panel.statusArea.dateMenu.menu.toggle();"],
+                capture_output=True, timeout=3,
+            )
+        except Exception:
+            pass
+
+
+def alt_tab():
+    """Switch to the previous window (Alt+Tab)."""
+    pyautogui.hotkey("alt", "tab")
+
+
+def force_kill_process(name: str):
+    """Immediately SIGKILL a process by name without grace period."""
+    try:
+        import psutil
+        for proc in psutil.process_iter(["pid", "name", "exe", "cmdline"]):
+            try:
+                n = (proc.info.get("name") or "").lower()
+                e = (proc.info.get("exe") or "").lower()
+                if name.lower() in n or name.lower() in e:
+                    proc.kill()
+            except Exception:
+                continue
+    except ImportError:
+        if shutil.which("pkill"):
+            subprocess.run(["pkill", "-9", "-f", name], timeout=5)
+
+
 ACTION_MAP: dict[str, callable] = {
     "volume_up":           volume_up,
     "volume_down":         volume_down,
@@ -579,9 +670,16 @@ ACTION_MAP: dict[str, callable] = {
     "file_explorer":       open_file_explorer,
     "open_run":            open_run,
     "dark_mode":           dark_mode,
-    "toggle_wifi":         toggle_wifi,
-    "restart":             restart_computer,
-    "shutdown":            shutdown_computer,
+    "toggle_wifi":              toggle_wifi,
+    "restart":                  restart_computer,
+    "shutdown":                 shutdown_computer,
+    "focus_window":             focus_window,
+    "window_move":              window_move,
+    "window_resize":            window_resize,
+    "dismiss_notifications":    dismiss_notifications,
+    "alt_tab":                  alt_tab,
+    "app_switcher":             alt_tab,
+    "force_kill":               force_kill_process,
 }
 
 _DANGEROUS_ACTIONS = {"restart", "shutdown"}
@@ -695,6 +793,32 @@ def computer_settings(
     if action == "scroll_down":
         scroll_down(int(value or 500))
         return "Scrolled down."
+
+    if action == "focus_window":
+        title = str(value or params.get("title", "")).strip()
+        if not title:
+            return "No window title provided."
+        focus_window(title)
+        return f"Focused window: '{title}'."
+
+    if action == "window_move":
+        x = int(params.get("x", value or 0))
+        y = int(params.get("y", 0))
+        window_move(x, y)
+        return f"Window moved to ({x}, {y})."
+
+    if action == "window_resize":
+        w = int(params.get("width", value or 800))
+        h = int(params.get("height", 600))
+        window_resize(w, h)
+        return f"Window resized to {w}×{h}."
+
+    if action in ("force_kill", "kill"):
+        name = str(value or params.get("name", params.get("app_name", ""))).strip()
+        if not name:
+            return "No process name provided."
+        force_kill_process(name)
+        return f"Force-killed '{name}'."
 
     func = ACTION_MAP.get(action)
     if not func:

@@ -14,8 +14,10 @@ The tool exposes two actions:
 import platform
 import shutil
 import subprocess
+from collections import deque
 
 _OS = platform.system()
+_HISTORY: deque[str] = deque(maxlen=10)  # last 10 clipboard entries
 
 
 def _wayland_active() -> bool:
@@ -128,12 +130,29 @@ def clipboard(parameters=None, response=None, player=None, session_memory=None) 
         if not text:
             return "No text provided to copy."
         ok = _clipboard_set(text)
+        if ok:
+            _HISTORY.appendleft(text)
         if player:
             player.write_log(f"[clipboard] set ({len(text)} chars) {'✓' if ok else '✗'}")
         return f"Copied {len(text)} chars to clipboard." if ok else "Clipboard write failed (no clipboard tool found)."
+
+    if action in ("history", "recent"):
+        if not _HISTORY:
+            # Try to seed history with current clipboard
+            current = _clipboard_get()
+            if current:
+                _HISTORY.appendleft(current)
+        if not _HISTORY:
+            return "Clipboard history is empty."
+        lines = []
+        for i, item in enumerate(_HISTORY, 1):
+            preview = item.replace("\n", "↵")[:80]
+            suffix  = "…" if len(item) > 80 else ""
+            lines.append(f"{i}. {preview}{suffix}")
+        return f"Clipboard history (last {len(_HISTORY)}):\n" + "\n".join(lines)
 
     if action in ("clear", "empty"):
         ok = _clipboard_set("")
         return "Clipboard cleared." if ok else "Could not clear clipboard."
 
-    return f"Unknown clipboard action: '{action}'. Try: get | set | clear"
+    return f"Unknown clipboard action: '{action}'. Try: get | set | copy | history | clear"

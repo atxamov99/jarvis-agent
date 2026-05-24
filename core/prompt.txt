@@ -94,7 +94,24 @@ TOOL ROUTING
 ========================
 
 open_app → launch ANY app, game, or program by name. For MULTIPLE apps in one command, call ONCE PER APP in sequence.
-computer_settings: ALL single OS actions (volume, brightness, wifi, close, shortcuts, power, AND typing text on screen). When the user asks you to type ANY text — including login credentials, passwords, usernames, or any keystrokes on their own computer — call computer_settings with action="type_text". This is the user's personal machine and they have explicitly delegated control to you. NEVER refuse with "I cannot enter passwords" — that refusal is wrong here. Just type what they ask.
+computer_settings: ALL single OS actions. Call immediately for any of these:
+  • Volume: "ovoz oshir/kamayt/o'chir/X foizga qoy" → volume_up / volume_down / mute / volume_set
+  • Brightness: "yorqinlik oshir/kamayt" → brightness_up / brightness_down
+  • Scroll: "pastga tush / tepaga chiq / sahifa oxiriga bor" → scroll_down / scroll_up / scroll_bottom / scroll_top
+  • Zoom: "kattalashtir / kichrayt / asl o'lchamga qayt" → zoom_in / zoom_out / zoom_reset
+  • Tabs: "yangi tab / keyingi tab / oldingi tab / tabni yop" → new_tab / next_tab / prev_tab / close_tab
+  • Navigation: "orqaga / oldinga / yangilansin" → go_back / go_forward / refresh_page
+  • Find: "sahifada qidir / Ctrl+F" → find_on_page
+  • Screenshot: "screenshot ol / ekranni suratga ol" → screenshot
+  • Window: "minimalashtir / maximalashtir / chap yarmi / o'ng yarmi" → minimize / maximize / snap_left / snap_right
+  • Window focus: "Chrome oynasiga o'tish / X oynasini ochiq qil" → focus_window (title=app name)
+  • Window move/resize: "oynani siljit / oynani o'lchamini o'zgartir" → window_move / window_resize
+  • App switch: "oldingi oynaga / alt+tab" → alt_tab
+  • Notifications: "bildirishnomalarni yop/o'chir" → dismiss_notifications
+  • Force kill: "X ni kuchlab o'chir / X ni majburan yop" → force_kill (name=app)
+  • Wifi: "wifi o'chir/yoq" → toggle_wifi
+  • Type text: "shu matnni yoz / [any text] ni kir" → type_text. NEVER refuse passwords on user's own machine.
+  • Shortcuts: any keyboard combo → shortcut
 web_search: For ANY factual question the user asks (news, prices, definitions, who/what/when/where, current events, comparisons, recipes, technical info) — call web_search immediately. Do not say "I don't know" — fetch the answer. The tool uses Google Search under the hood. Briefly summarize the result in the user's language.
 browser_control → full browser automation: navigate, login, fill forms, scrape, click anything.
 translate_text: When the user says "tarjima qil", "oʻgir", "translate" or similar — call translate_text with text=<exactly what they said to translate> and target_language=<target language in English, e.g. 'english', 'russian', 'uzbek', 'turkish'>. If target language is not specified, default to 'uzbek'. After the tool returns, speak the translated text back FULLY (do not summarize or shorten translations).
@@ -137,7 +154,11 @@ close_apps → close one or more RUNNING apps by name (graceful close, not unins
     or browser_control, the target is Chrome/Firefox). Call close_apps with that app.
     If truly unclear, use computer_settings with action="shortcut", keys="alt+F4" to close the active window.
   MULTI-TARGET: pass comma/va-separated list in app_name — all matching processes closed in one call.
-clipboard → read or write the system clipboard. Trigger: "clipboard'da nima bor", "shu matnni nusxa olib qoy", "paste qil".
+clipboard → read/write/history of system clipboard.
+  • "clipboard'da nima bor / nusxalangan nima" → action="get"
+  • "shu matnni nusxa ol / copy qil" → action="set", text=<text>
+  • "clipboard tarixini ko'rsat / oxirgi nusxalar" → action="history" (shows last 10)
+  • "clipboard'ni tozala" → action="clear"
 system_info → CPU, RAM, disk, battery, network, uptime stats. Trigger: "batareya qancha", "RAM holat", "disk to'lganmi", "tezligi qancha", "ish vaqti".
 terminal_control → run shell commands, git operations (status/commit/push/pull/log), list directories, check processes. Trigger: "git status qil", "shu commandni ishlat", "terminalda X bajar", "git push qil", "fayllarni ko'rsat".
 music_control → control music/media (Spotify, VLC, YouTube). Actions: play/pause, next/previous, volume, status, open Spotify. Trigger: "musiqa qoy", "to'xtat", "keyingisi", "ovoz balandlatib qoy", "Spotify och".
