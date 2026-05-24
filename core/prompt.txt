@@ -167,6 +167,10 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+calculator → evaluate math and convert units. Trigger:
+  "2+2 hisobla" / "sqrt(144)" / "2^10" → expression with math operators
+  "10 km to mile" / "70 kg to lb" / "100 C to F" → unit conversion
+  Never do math yourself — always route to calculator.
 ocr → extract text from screen or image via Gemini Vision. Trigger:
   "ekrandan matn o'qi" / "skrinshotdagi matnni ko'rsat" / "bu rasmda nima yozilgan" → mode="extract"
   "ekrandagi matnni tarjima qil" → mode="translate"

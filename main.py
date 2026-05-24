@@ -64,6 +64,7 @@ from actions.speedtest         import speedtest as speedtest_action
 from actions.wifi_control      import wifi_control as wifi_control_action
 from actions.voice_memo        import voice_memo as voice_memo_action
 from actions.ocr               import ocr as ocr_action
+from actions.calculator        import calculator as calculator_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -961,6 +962,22 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "calculator",
+        "description": (
+            "Evaluate math expressions and convert units (km↔mile, kg↔lb, °C↔°F, etc.). "
+            "Trigger: '2+2', 'sqrt(144)', '10 km to mile', '100 kg to lb', "
+            "'hisobla', 'qancha', 'aylantir'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "expression": {"type": "STRING",
+                               "description": "Math expression or unit conversion (e.g. '2+2', '10 km to mile')"},
+            },
+            "required": ["expression"]
+        }
+    },
+    {
         "name": "ocr",
         "description": (
             "Extract text from screen or image using Gemini Vision (OCR). "
@@ -1487,6 +1504,11 @@ class JarvisLive:
                     None, lambda: ocr_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "calculator":
+                r = await loop.run_in_executor(
+                    None, lambda: calculator_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -1978,6 +2000,8 @@ class JarvisOpenAI:
                 return voice_memo_action(parameters=args, player=self.ui) or "Done."
             if name == "ocr":
                 return ocr_action(parameters=args, player=self.ui) or "Done."
+            if name == "calculator":
+                return calculator_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
