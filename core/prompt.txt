@@ -215,6 +215,14 @@ disk_manager → disk usage analysis: partitions, top directories, large files. 
   "Downloads da katta papkalar" → action="top", path="~/Downloads"
   "100MB dan katta fayllar" → action="large", min_mb=100
   Uses psutil for partition info; du/find for directory analysis.
+cron_manager → view, add, delete cron jobs from user crontab. Trigger:
+  "cron ro'yxati" / "cron jadval" → action="list"
+  "har kuni soat 8 da skript ishga tushir" → action="add", schedule="0 8 * * *", command="/path/script.sh"
+  "har daqiqada ping" → action="add", schedule="har_daqiqa", command="ping..."
+  "1-cron ni o'chir" → action="delete", index=1
+  "[buyruq] cron ni o'chir" → action="delete", command="buyruq"
+  Schedule aliases: har_daqiqa | har_soat | har_kun | har_haftada | har_oyda.
+  Uses system crontab CLI — no dependencies.
 currency → real-time currency conversion (USD/EUR/RUB/UZS/GBP/CNY/TRY/KZT/AED...). Trigger:
   "100 dollar necha so'm" → amount=100, from="USD", to="UZS"
   "1 evro necha rubl" → from="EUR", to="RUB"

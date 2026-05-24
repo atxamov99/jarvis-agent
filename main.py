@@ -86,6 +86,7 @@ from actions.hash_tool         import hash_tool as hash_action
 from actions.qr_code           import qr_code as qr_action
 from actions.focus_mode        import focus_mode as focus_action
 from actions.disk_manager      import disk_manager as disk_action
+from actions.cron_manager      import cron_manager as cron_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -1583,6 +1584,28 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "cron_manager",
+        "description": (
+            "View, add, and remove cron jobs from user crontab. "
+            "Trigger: 'cron ro'yxati', 'cron qo'sh', 'har kuni skript ishga tushir', "
+            "'cron o'chir'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":   {"type": "STRING",
+                             "description": "list | add | delete | clear"},
+                "schedule": {"type": "STRING",
+                             "description": "Cron schedule: '0 8 * * *' or alias: har_kun|har_soat|har_daqiqa|har_haftada|har_oyda"},
+                "command":  {"type": "STRING",
+                             "description": "Shell command to run"},
+                "index":    {"type": "INTEGER",
+                             "description": "1-based index to delete (from list output)"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -2103,6 +2126,11 @@ class JarvisLive:
             elif name == "disk_manager":
                 r = await loop.run_in_executor(
                     None, lambda: disk_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "cron_manager":
+                r = await loop.run_in_executor(
+                    None, lambda: cron_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -2641,6 +2669,8 @@ class JarvisOpenAI:
                 return focus_action(parameters=args, player=self.ui) or "Done."
             if name == "disk_manager":
                 return disk_action(parameters=args, player=self.ui) or "Done."
+            if name == "cron_manager":
+                return cron_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
