@@ -70,6 +70,7 @@ from actions.summarizer        import summarizer as summarizer_action
 from actions.pdf_summarizer    import pdf_summarizer as pdf_action
 from actions.chat_history      import chat_history as chat_history_action
 from actions.totp              import totp as totp_action
+from actions.weather_extended  import weather_extended as weather_ext_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -967,6 +968,26 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "weather_extended",
+        "description": (
+            "Get real-time weather data with temperature, humidity, wind, precipitation. "
+            "Supports current, multi-day forecast, and hourly breakdown. No API key needed. "
+            "Trigger: 'ob-havo', 'harorat', 'yomg'ir yog'adimi', '3 kunlik prognoz', 'soatlik ob-havo'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "city": {"type": "STRING",
+                         "description": "City name (default: Tashkent)"},
+                "mode": {"type": "STRING",
+                         "description": "current | forecast | hourly (default: current)"},
+                "days": {"type": "INTEGER",
+                         "description": "Forecast days 1-7 (default: 3, only for forecast mode)"},
+            },
+            "required": []
+        }
+    },
+    {
         "name": "totp",
         "description": (
             "Generate TOTP 2FA codes; add/list/delete saved secrets. "
@@ -1646,6 +1667,11 @@ class JarvisLive:
                     None, lambda: totp_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "weather_extended":
+                r = await loop.run_in_executor(
+                    None, lambda: weather_ext_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2150,6 +2176,8 @@ class JarvisOpenAI:
                 return chat_history_action(parameters=args, player=self.ui) or "Done."
             if name == "totp":
                 return totp_action(parameters=args, player=self.ui) or "Done."
+            if name == "weather_extended":
+                return weather_ext_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
