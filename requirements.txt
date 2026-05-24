@@ -35,3 +35,5 @@ pypdf
 pyotp
 pynput
 yt-dlp
+qrcode[pil]
+pyzbar

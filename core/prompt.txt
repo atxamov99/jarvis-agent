@@ -194,6 +194,13 @@ hash_tool → compute/verify cryptographic hashes (stdlib hashlib, no deps). Tri
   "heshni tekshir" → action="verify", file="...", expected="abc123..."
   "barcha heshlar" → action="all" (shows MD5/SHA1/SHA256/SHA512/SHA224/SHA384)
   Default algo: sha256. Supports: md5 | sha1 | sha256 | sha512 | sha224 | sha384.
+qr_code → generate QR codes from text/URL; decode QR images; list saved codes. Trigger:
+  "bu URL uchun QR kod yarat: [url]" → action="generate", data="url"
+  "kontakt uchun QR" → action="generate", data="BEGIN:VCARD..."
+  "wifi QR kodi" → action="generate", data="WIFI:T:WPA;S:ssid;P:pass;;"
+  "QR kodini o'qi: [fayl]" → action="decode", file="/path/to/img.png"
+  "QR kodlar ro'yxati" → action="list"
+  Saves to ~/Pictures/QRCodes/. Auto-opens generated QR with xdg-open.
 currency → real-time currency conversion (USD/EUR/RUB/UZS/GBP/CNY/TRY/KZT/AED...). Trigger:
   "100 dollar necha so'm" → amount=100, from="USD", to="UZS"
   "1 evro necha rubl" → from="EUR", to="RUB"

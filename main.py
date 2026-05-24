@@ -83,6 +83,7 @@ from actions.yt_downloader     import yt_downloader as ytdl_action
 from actions.screen_recorder   import screen_recorder as screenrec_action
 from actions.network_tools     import network_tools as network_action
 from actions.hash_tool         import hash_tool as hash_action
+from actions.qr_code           import qr_code as qr_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -1514,6 +1515,29 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "qr_code",
+        "description": (
+            "Generate QR codes from text/URL, decode QR images, list saved QR codes. "
+            "Trigger: 'QR kod yaratib ber', 'bu URL uchun QR', 'QR kodini o'qi'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "generate | decode | list"},
+                "data":   {"type": "STRING",
+                           "description": "Text, URL, or data to encode (for generate)"},
+                "name":   {"type": "STRING",
+                           "description": "Output filename without extension (default: qr)"},
+                "size":   {"type": "INTEGER",
+                           "description": "Box size in pixels (default: 10)"},
+                "file":   {"type": "STRING",
+                           "description": "Image file path to decode (for decode)"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -2019,6 +2043,11 @@ class JarvisLive:
             elif name == "hash_tool":
                 r = await loop.run_in_executor(
                     None, lambda: hash_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "qr_code":
+                r = await loop.run_in_executor(
+                    None, lambda: qr_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -2551,6 +2580,8 @@ class JarvisOpenAI:
                 return network_action(parameters=args, player=self.ui) or "Done."
             if name == "hash_tool":
                 return hash_action(parameters=args, player=self.ui) or "Done."
+            if name == "qr_code":
+                return qr_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
