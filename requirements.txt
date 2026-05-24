@@ -4,7 +4,6 @@ edge-tts
 soundfile
 google-genai
 google-generativeai
-openai
 pillow
 requests
 beautifulsoup4
