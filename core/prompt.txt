@@ -167,6 +167,11 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+notifier → schedule a one-shot desktop notification popup after N minutes/seconds. Trigger:
+  "10 daqiqadan keyin eslatib ber: [xabar]" → minutes=10, message="[xabar]"
+  "30 soniyadan keyin bildirish yubor: [xabar]" → seconds=30
+  "hozir xabar ber: [xabar]" → minutes=0
+  "2 soatdan keyin: [xabar]" → minutes=120
 pomodoro → Pomodoro timer: start work/break cycle, stop, or check remaining time. Trigger:
   "pomodoro boshlash" / "25 daqiqa ish" / "taymer boshlash" → action="start" (work_minutes=25, break_minutes=5)
   "pomodorani to'xtat" / "taymerni bekor qil" → action="stop"

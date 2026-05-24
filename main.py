@@ -57,6 +57,7 @@ from actions.gaming_control    import gaming_control
 from actions.clap_detector     import ClapDetector
 from actions.notes             import notes as notes_action
 from actions.pomodoro          import pomodoro as pomodoro_action
+from actions.notifier          import notifier as notifier_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -933,6 +934,26 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "notifier",
+        "description": (
+            "Schedule a desktop notification popup after N minutes or seconds. "
+            "Trigger: '10 daqiqadan keyin eslatib ber', 'X vaqtdan keyin xabar ber', "
+            "'30 soniyadan keyin bildirish yubor', 'hozir xabar ber'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "message": {"type": "STRING",
+                            "description": "Notification message text"},
+                "minutes": {"type": "NUMBER",
+                            "description": "Delay in minutes (0 for immediate)"},
+                "seconds": {"type": "NUMBER",
+                            "description": "Additional delay in seconds"},
+            },
+            "required": ["message"]
+        }
+    },
 ]
 
 class JarvisLive:
@@ -1310,6 +1331,11 @@ class JarvisLive:
             elif name == "pomodoro":
                 r = await loop.run_in_executor(
                     None, lambda: pomodoro_action(parameters=args, player=self.ui, speak=self.speak))
+                result = r or "Done."
+
+            elif name == "notifier":
+                r = await loop.run_in_executor(
+                    None, lambda: notifier_action(parameters=args, player=self.ui, speak=self.speak))
                 result = r or "Done."
 
             elif name == "shutdown_jarvis":
@@ -1789,6 +1815,8 @@ class JarvisOpenAI:
                 return notes_action(parameters=args, player=self.ui) or "Done."
             if name == "pomodoro":
                 return pomodoro_action(parameters=args, player=self.ui) or "Done."
+            if name == "notifier":
+                return notifier_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
