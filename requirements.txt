@@ -30,3 +30,4 @@ openwakeword
 onnxruntime
 speexdsp-ns
 speedtest-cli
+google-auth-oauthlib

@@ -65,6 +65,7 @@ from actions.wifi_control      import wifi_control as wifi_control_action
 from actions.voice_memo        import voice_memo as voice_memo_action
 from actions.ocr               import ocr as ocr_action
 from actions.calculator        import calculator as calculator_action
+from actions.google_calendar   import google_calendar as gcal_action
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -962,6 +963,35 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "google_calendar",
+        "description": (
+            "List upcoming events, create new events, or delete events in Google Calendar. "
+            "Requires OAuth2 credentials at ~/.config/jarvis/gcal_credentials.json. "
+            "Trigger: 'kalendar voqealarini ko'rsat', 'uchrashuvni qo'sh', "
+            "'bugun nima bor', 'X voqeani o'chir'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":             {"type": "STRING",
+                                       "description": "list | create | delete"},
+                "days":               {"type": "INTEGER",
+                                       "description": "Days ahead to list (default: 7)"},
+                "title":              {"type": "STRING",
+                                       "description": "Event title (for create/delete)"},
+                "start":              {"type": "STRING",
+                                       "description": "Start date/time: 'bugun', 'ertaga', '2025-06-01 14:00'"},
+                "duration_minutes":   {"type": "INTEGER",
+                                       "description": "Duration in minutes (default: 60)"},
+                "location":           {"type": "STRING",
+                                       "description": "Event location (optional)"},
+                "description":        {"type": "STRING",
+                                       "description": "Event description (optional)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "calculator",
         "description": (
             "Evaluate math expressions and convert units (km↔mile, kg↔lb, °C↔°F, etc.). "
@@ -1509,6 +1539,11 @@ class JarvisLive:
                     None, lambda: calculator_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "google_calendar":
+                r = await loop.run_in_executor(
+                    None, lambda: gcal_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2002,6 +2037,8 @@ class JarvisOpenAI:
                 return ocr_action(parameters=args, player=self.ui) or "Done."
             if name == "calculator":
                 return calculator_action(parameters=args, player=self.ui) or "Done."
+            if name == "google_calendar":
+                return gcal_action(parameters=args, player=self.ui) or "Done."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():

@@ -167,6 +167,12 @@ notes → shaxsiy eslatmalar (~/Notes/ papkasida markdown). Trigger:
   "eslatmada [so'z] ni qidir" → action="search"
   "[mavzu] notasiga qo'sh: [matn]" → action="append"
   "[mavzu] notasini o'chir" → action="delete"
+google_calendar → list, create, or delete Google Calendar events. Trigger:
+  "kalendar voqealarini ko'rsat" / "bugun nima bor" → action="list"
+  "7 kunlik jadval" → action="list", days=7
+  "[sarlavha] uchrashuvini qo'sh [vaqt]da" → action="create", title=..., start=...
+  "[sarlavha] voqeani o'chir" → action="delete", title=...
+  Setup: OAuth2 JSON ni ~/.config/jarvis/gcal_credentials.json ga qo'ying.
 calculator → evaluate math and convert units. Trigger:
   "2+2 hisobla" / "sqrt(144)" / "2^10" → expression with math operators
   "10 km to mile" / "70 kg to lb" / "100 C to F" → unit conversion
