@@ -96,37 +96,81 @@ def _find_matching_pids(query: str) -> list[int]:
     return matched
 
 
+def _close_by_window_title(query: str) -> bool:
+    """Try closing windows whose title contains query using xdotool. Returns True if any closed."""
+    if not shutil.which("xdotool"):
+        return False
+    try:
+        result = subprocess.run(
+            ["xdotool", "search", "--name", query],
+            capture_output=True, text=True, timeout=5
+        )
+        wids = [w.strip() for w in result.stdout.splitlines() if w.strip()]
+        if not wids:
+            return False
+        for wid in wids:
+            subprocess.run(["xdotool", "windowclose", wid], timeout=3)
+        print(f"[close_apps] xdotool closed {len(wids)} window(s) matching '{query}'")
+        return True
+    except Exception as e:
+        print(f"[close_apps] xdotool error: {e}")
+        return False
+
+
+def _close_active_window() -> str:
+    """Close whichever window is currently focused."""
+    if shutil.which("xdotool"):
+        try:
+            subprocess.run(["xdotool", "getactivewindow", "windowclose"], timeout=3)
+            return "Active window closed."
+        except Exception:
+            pass
+    # Fallback: Alt+F4
+    try:
+        import pyautogui
+        pyautogui.hotkey("alt", "f4")
+        return "Active window closed (Alt+F4)."
+    except Exception as e:
+        return f"Could not close active window: {e}"
+
+
 def _close_one(app_name: str) -> str:
+    # Special keyword: close active/current window
+    if app_name.lower() in ("active", "current", "bu", "shu", "hozirgi", "faol"):
+        return _close_active_window()
+
     if _PSUTIL:
         pids = _find_matching_pids(app_name)
-        if not pids:
-            return f"No running process found for '{app_name}'."
+        if pids:
+            terminated = []
+            killed = []
+            for pid in pids:
+                try:
+                    p = psutil.Process(pid)
+                    p.terminate()
+                    terminated.append(pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
 
-        terminated = []
-        killed = []
-        for pid in pids:
-            try:
-                p = psutil.Process(pid)
-                p.terminate()
-                terminated.append(pid)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
+            time.sleep(2.0)
 
-        # Give them 2 seconds to shut down gracefully
-        time.sleep(2.0)
+            for pid in terminated:
+                try:
+                    p = psutil.Process(pid)
+                    if p.is_running():
+                        p.kill()
+                        killed.append(pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
 
-        for pid in terminated:
-            try:
-                p = psutil.Process(pid)
-                if p.is_running():
-                    p.kill()
-                    killed.append(pid)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
+            if killed:
+                return f"Closed {app_name} ({len(terminated)} processes, {len(killed)} force-killed)."
+            return f"Closed {app_name} ({len(terminated)} process{'es' if len(terminated) != 1 else ''})."
 
-        if killed:
-            return f"Closed {app_name} ({len(terminated)} processes, {len(killed)} force-killed)."
-        return f"Closed {app_name} ({len(terminated)} process{'es' if len(terminated) != 1 else ''})."
+        # Process not found — try closing by window title
+        if _close_by_window_title(app_name):
+            return f"Closed window(s) matching '{app_name}'."
+        return f"No running process or window found for '{app_name}'."
 
     # Fallback: pkill / taskkill
     if _OS == "Windows":
@@ -142,16 +186,22 @@ def _close_one(app_name: str) -> str:
                 r = subprocess.run(["pkill", "-f", cand], capture_output=True, timeout=5)
                 if r.returncode == 0:
                     return f"Closed {app_name}."
-            return f"No running process matched '{app_name}'."
+        # Try window title as last resort
+        if _close_by_window_title(app_name):
+            return f"Closed window(s) matching '{app_name}'."
+        return f"No running process matched '{app_name}'."
     return f"No close mechanism available for '{app_name}'."
 
 
 def close_apps(parameters=None, response=None, player=None, session_memory=None) -> str:
-    params   = parameters or {}
-    raw      = (params.get("app_name") or params.get("app_names") or "").strip()
+    params = parameters or {}
+    raw    = (params.get("app_name") or params.get("app_names") or "").strip()
 
-    if not raw:
-        return "No application name provided."
+    # "active window" shorthand
+    if not raw or raw.lower() in ("active", "current", "bu", "shu", "hozirgi", "faol"):
+        if player:
+            player.write_log("[close_apps] Closing active window")
+        return _close_active_window()
 
     apps = _split_app_names(raw)
     if not apps:
