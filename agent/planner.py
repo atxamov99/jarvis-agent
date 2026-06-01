@@ -168,27 +168,31 @@ OUTPUT — return ONLY valid JSON, no markdown, no explanation, no code blocks:
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+        return json.load(f)["openai_api_key"]
+
+
+def _openai_client():
+    from openai import OpenAI
+    return OpenAI(api_key=_get_api_key())
 
 
 def create_plan(goal: str, context: str = "") -> dict:
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(api_key=_get_api_key())
+    client = _openai_client()
 
     user_input = f"Goal: {goal}"
     if context:
         user_input += f"\n\nContext: {context}"
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=user_input,
-            config=types.GenerateContentConfig(system_instruction=PLANNER_PROMPT),
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": PLANNER_PROMPT},
+                {"role": "user",   "content": user_input},
+            ],
         )
-        text = response.text.strip()
-        text     = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
+        text = response.choices[0].message.content.strip()
+        text = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
 
         plan = json.loads(text)
 
@@ -233,10 +237,7 @@ def _fallback_plan(goal: str) -> dict:
 
 
 def replan(goal: str, completed_steps: list, failed_step: dict, error: str) -> dict:
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(api_key=_get_api_key())
+    client = _openai_client()
 
     completed_summary = "\n".join(
         f"  - Step {s['step']} ({s['tool']}): DONE" for s in completed_steps
@@ -253,14 +254,16 @@ Error: {error}
 Create a REVISED plan for the remaining work only. Do not repeat completed steps."""
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(system_instruction=PLANNER_PROMPT),
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": PLANNER_PROMPT},
+                {"role": "user",   "content": prompt},
+            ],
         )
-        text = response.text.strip()
-        text     = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
-        plan     = json.loads(text)
+        text = response.choices[0].message.content.strip()
+        text = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
+        plan = json.loads(text)
 
         for step in plan.get("steps", []):
             if step.get("tool") == "generated_code":

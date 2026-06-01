@@ -114,8 +114,12 @@ if ($existingKey) {
     Write-Warn "Get one (free) at: https://aistudio.google.com/apikey"
     $GeminiKey = Read-Host "Paste your Gemini API key (or press Enter to skip)"
     @{
-        gemini_api_key = $GeminiKey
-        live_model     = ""
+        gemini_api_key    = $GeminiKey
+        openai_api_key    = ""
+        anthropic_api_key = ""
+        groq_api_key      = ""
+        backend           = "auto"
+        live_model        = ""
         os_system      = "windows"
     } | ConvertTo-Json | Set-Content -Path $ConfigFile -Encoding UTF8
     if ($GeminiKey) { Write-Ok "API key saved" } else { Write-Warn "⚠ Key not set yet — edit $ConfigFile later" }

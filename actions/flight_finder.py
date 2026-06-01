@@ -20,7 +20,7 @@ API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+        return json.load(f)["openai_api_key"]
 
 _MONTH_MAP: dict[str, int] = {
 
@@ -62,21 +62,21 @@ def _parse_date(raw: str) -> str:
             return val.strftime("%Y-%m-%d")
 
     try:
-        from google import genai
-        client   = genai.Client(api_key=_get_api_key())
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=(
+        from actions.openai_client import get_client
+        client   = get_client()
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": (
                 f"Today is {today.strftime('%Y-%m-%d')}. "
                 f"Convert this date expression to YYYY-MM-DD: '{raw}'. "
                 f"Return ONLY the date string, nothing else."
-            ),
+            )}],
         )
-        result = response.text.strip()
+        result = response.choices[0].message.content.strip()
         if re.match(r"\d{4}-\d{2}-\d{2}", result):
             return result
     except Exception as e:
-        print(f"[FlightFinder] ⚠️ Gemini date parse failed: {e}")
+        print(f"[FlightFinder] ⚠️ Date parse failed: {e}")
 
     for month_name, month_num in _MONTH_MAP.items():
         if month_name in lower:
@@ -149,43 +149,42 @@ def _search_flights_browser(
     return (raw or ""), url
 
 def _parse_flights_with_gemini(
-    raw_text:    str,
-    origin:      str,
-    destination: str,
-    date:        str,
+    raw_text: str, origin: str, destination: str, date: str
 ) -> list[dict]:
-    from google import genai
-    from google.genai import types
+    from actions.openai_client import get_client
+    client = get_client()
 
-    client = genai.Client(api_key=_get_api_key())
+    prompt = f"""Extract flight information from the following text.
+Origin: {origin}
+Destination: {destination}
+Date: {date}
 
-    prompt = (
-        f"Extract flight options from {origin} to {destination} on {date} "
-        f"from this Google Flights page text:\n\n{raw_text[:12000]}\n\n"
-        f"Return a JSON array of up to 5 flights:\n"
-        f'[{{"airline":"...","departure":"HH:MM","arrival":"HH:MM",'
-        f'"duration":"Xh Ym","stops":0,"price":"...","currency":"USD"}}]\n'
-        f"If no flights found, return: []"
-    )
+Raw text:
+{raw_text[:6000]}
+
+Return a JSON array of flight objects. Each object should have:
+- airline: string
+- flight_number: string
+- departure_time: string
+- arrival_time: string
+- duration: string
+- price: string
+- stops: number
+
+Return ONLY valid JSON array, no markdown."""
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=(
-                    "You are a flight data extraction expert. "
-                    "Extract flight information from raw webpage text. "
-                    "Return ONLY valid JSON — no markdown, no explanation."
-                ),
-            ),
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
         )
-        text = re.sub(r"```(?:json)?", "", response.text).strip().rstrip("`").strip()
-        flights  = json.loads(text)
-        return flights if isinstance(flights, list) else []
+        text = response.choices[0].message.content.strip()
+        text = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
+        return json.loads(text)
     except Exception as e:
-        print(f"[FlightFinder] ⚠️ Gemini parse failed: {e}")
+        print(f"[FlightFinder] ⚠️ Flight parse failed: {e}")
         return []
+
 
 def _format_spoken(
     flights:     list[dict],

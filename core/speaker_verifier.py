@@ -16,6 +16,7 @@ from scipy.signal import get_window
 
 _PROFILE_DIR  = Path.home() / ".config" / "jarvis"
 _PROFILE_PATH = _PROFILE_DIR / "voice_profile.npz"
+_VOICE_ID_CFG = _PROFILE_DIR / "voice_id.cfg"   # master ON/OFF toggle (owner-only mode)
 
 _N_MFCC       = 20
 _N_MELS       = 40
@@ -27,6 +28,7 @@ _THRESHOLD    = -25.0   # log-likelihood per frame
 _state = {
     "gmm":       None,
     "enabled":   False,
+    "active":    True,    # owner-only mode ON when a profile exists (toggleable)
     "threshold": _THRESHOLD,
 }
 _lock = threading.Lock()
@@ -156,13 +158,74 @@ def is_enabled() -> bool:
     return _state["enabled"] and _state["gmm"] is not None
 
 
+# ── Owner-only master switch (Voice ID toggle, persisted) ─────────────────────
+
+def _load_active():
+    """Read persisted ON/OFF. Default ON (owner-only) when config absent."""
+    try:
+        if _VOICE_ID_CFG.exists():
+            _state["active"] = (_VOICE_ID_CFG.read_text(encoding="utf-8").strip().lower() == "on")
+    except Exception:
+        _state["active"] = True
+
+def _save_active(active: bool):
+    try:
+        _PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        _VOICE_ID_CFG.write_text("on" if active else "off", encoding="utf-8")
+    except Exception as e:
+        print(f"[SpeakerVerifier] Cannot save Voice ID state: {e}")
+
+def is_active() -> bool:
+    """True when owner-only voice mode is enabled by the user."""
+    return _state["active"]
+
+def set_active(active: bool) -> str:
+    """Turn owner-only mode ON/OFF without deleting the enrolled profile."""
+    active = bool(active)
+    _save_active(active)
+    with _lock:
+        _state["active"] = active
+    print(f"[SpeakerVerifier] Owner-only mode {'ON' if active else 'OFF'}.")
+    return "on" if active else "off"
+
+
+def _calibrate_threshold(mfcc, weights, means, covariances) -> tuple:
+    """Derive an owner-relative threshold from enrollment audio alone.
+
+    Scores overlapping windows of the owner's own speech, then sets the
+    threshold just below the owner's weakest windows. This adapts to the
+    speaker's voice + microphone instead of a brittle fixed value, so the
+    owner passes reliably while clearly different voices fall below.
+    Returns (threshold, owner_mean, owner_min).
+    """
+    win, step = 150, 75   # 1.5s windows, 0.75s overlap (hop=10ms)
+    scores = []
+    for start in range(0, max(1, len(mfcc) - win + 1), step):
+        w = mfcc[start:start + win]
+        if len(w) >= 30:
+            scores.append(_gmm_score(w, weights, means, covariances))
+    if len(scores) >= 4:
+        import numpy as _np
+        arr = _np.array(scores)
+        # Generous margin: live speech varies more than enrollment, so the owner
+        # must stay comfortably above threshold. Rejecting the owner is the worst
+        # failure; a clearly different voice/TV still scores far lower than this.
+        thr = float(_np.percentile(arr, 8)) - 6.0
+        owner_mean, owner_min = float(arr.mean()), float(arr.min())
+    else:
+        base = _gmm_score(mfcc, weights, means, covariances)
+        thr, owner_mean, owner_min = base - 8.0, base, base
+    thr = max(min(thr, -8.0), -45.0)   # clamp to a sane range
+    return thr, owner_mean, owner_min
+
+
 def enroll(raw_pcm: bytes, sr: int = 16000) -> str:
-    """Fit GMM on enrollment audio (need ≥10s of speech)."""
+    """Fit GMM on enrollment audio (need ≥10s of speech) + auto-calibrate threshold."""
     from sklearn.mixture import GaussianMixture
 
     mfcc = _extract_mfcc(raw_pcm, sr)
     if mfcc is None or len(mfcc) < 50:
-        return "Ovoz namunasi juda qisqa (kamida 5 soniya kerak)."
+        return "Ovoz namunasi juda qisqa (kamida 5 soniya tinmay gapiring)."
 
     n_comp = min(_N_COMPONENTS, len(mfcc) // 5)
     gmm    = GaussianMixture(
@@ -179,21 +242,26 @@ def enroll(raw_pcm: bytes, sr: int = 16000) -> str:
     weights     = gmm.weights_
     means       = gmm.means_
     covariances = gmm.covariances_
-    threshold   = _state["threshold"]
+
+    threshold, owner_mean, owner_min = _calibrate_threshold(mfcc, weights, means, covariances)
 
     with _lock:
-        _state["gmm"] = {"weights": weights, "means": means, "covariances": covariances}
-        _state["enabled"] = True
+        _state["gmm"]       = {"weights": weights, "means": means, "covariances": covariances}
+        _state["enabled"]   = True
+        _state["active"]    = True   # enrolling turns owner-only mode ON
+        _state["threshold"] = threshold
 
     _save_profile(weights, means, covariances, threshold)
+    _save_active(True)
 
-    ll = _gmm_score(mfcc, weights, means, covariances)
-    print(f"[SpeakerVerifier] Enrolled. Frames={len(mfcc)}, LL={ll:.2f}")
-    return f"✅ Ovoz profili saqlandi! ({len(mfcc)} frame, LL={ll:.1f})"
+    print(f"[SpeakerVerifier] Enrolled. Frames={len(mfcc)}, "
+          f"owner_mean={owner_mean:.1f}, owner_min={owner_min:.1f}, thr={threshold:.1f}")
+    return (f"✅ Ovoz profili saqlandi! Endi Jarvis faqat sizning ovozingizga javob beradi.\n"
+            f"({len(mfcc)} frame | egasi LL≈{owner_mean:.1f} | chegara={threshold:.1f})")
 
 
 def verify(raw_pcm: bytes, sr: int = 16000) -> bool:
-    if not is_enabled():
+    if not is_enabled() or not _state["active"]:
         return True
 
     mfcc = _extract_mfcc(raw_pcm, sr)

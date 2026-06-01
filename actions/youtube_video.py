@@ -55,7 +55,7 @@ _YT_VIDEO_FILTER = "EgIQAQ%3D%3D"
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+        return json.load(f)["openai_api_key"]
 
 
 def _open_url(url: str) -> None:
@@ -163,27 +163,31 @@ def _get_transcript(video_id: str) -> str | None:
 
 
 def _summarize_with_gemini(transcript: str, video_url: str) -> str:
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(api_key=_get_api_key())
+    from actions.openai_client import get_client
+    client = get_client()
 
     max_chars = 80000
     truncated = transcript[:max_chars] + ("..." if len(transcript) > max_chars else "")
-    response  = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=f"Please summarize this YouTube video transcript:\n\n{truncated}",
-        config=types.GenerateContentConfig(
-            system_instruction=(
-                "You are JARVIS, an AI assistant. "
-                "Summarize YouTube video transcripts clearly and concisely. "
-                "Structure: 1-sentence overview, then 3-5 key points. "
-                "Be direct. Address the user as 'sir'. "
-                "Match the language of the transcript."
-            ),
-        ),
+    response  = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are JARVIS, an AI assistant. "
+                    "Summarize YouTube video transcripts clearly and concisely. "
+                    "Structure: 1-sentence overview, then 3-5 key points. "
+                    "Be direct. Address the user as 'sir'. "
+                    "Match the language of the transcript."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Please summarize this YouTube video transcript:\n\n{truncated}",
+            },
+        ],
     )
-    return response.text.strip()
+    return response.choices[0].message.content.strip()
 
 
 def _save_summary(content: str, video_url: str) -> str:

@@ -44,7 +44,7 @@ def _get_os() -> str:
 
 
 def _get_api_key() -> str:
-    return _load_config().get("gemini_api_key", "")
+    return _load_config().get("openai_api_key", "")
 
 _SAFE_SCREENSHOT_ROOTS = (
     Path.home(),
@@ -332,17 +332,18 @@ def _screen_find(description: str) -> tuple[int, int] | None:
         return None
 
     try:
-        from google import genai
-        from google.genai import types as gtypes
+        import base64
+        from actions.openai_client import _load_config
+        _cfg = _load_config()
 
         _require_pyautogui()
         w, h  = pyautogui.size()
         img   = pyautogui.screenshot()
         buf   = io.BytesIO()
         img.save(buf, format="PNG")
-        image_bytes = buf.getvalue()
+        img_bytes = buf.getvalue()
+        image_b64 = base64.b64encode(img_bytes).decode()
 
-        client = genai.Client(api_key=api_key)
         prompt = (
             f"This is a screenshot of a {w}×{h} pixel screen. "
             f"Locate the UI element described as: '{description}'. "
@@ -350,15 +351,34 @@ def _screen_find(description: str) -> tuple[int, int] | None:
             f"If the element is not visible, reply: NOT_FOUND"
         )
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=[
-                gtypes.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-                prompt,
-            ],
-        )
+        _oai_key = _cfg.get("openai_api_key", "")
+        _gem_key = _cfg.get("gemini_api_key", "")
 
-        text = (response.text or "").strip()
+        if _oai_key:
+            from openai import OpenAI
+            client = OpenAI(api_key=_oai_key)
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                    {"type": "text", "text": prompt},
+                ]}],
+            )
+            text = (response.choices[0].message.content or "").strip()
+        elif _gem_key:
+            from google import genai
+            from google.genai import types as gtypes
+            gclient = genai.Client(api_key=_gem_key)
+            gresponse = gclient.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[gtypes.Part.from_bytes(data=img_bytes, mime_type="image/png"), prompt],
+            )
+            text = (gresponse.text or "").strip()
+        else:
+            print("[ComputerControl] ⚠️ screen_find requires OpenAI or Gemini key")
+            return None
+
+        text = text
         if "NOT_FOUND" in text.upper():
             return None
 

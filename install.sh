@@ -62,25 +62,33 @@ fi
 green "✓ Python $PY_VER"
 
 # ── 2. system deps ───────────────────────────────────────────────────────────
-step "Checking system dependencies"
-MISSING_SYS=""
-
-check_cmd() {
-    if ! command -v "$1" >/dev/null 2>&1; then
-        MISSING_SYS+="$1 "
+step "Installing system dependencies"
+# Tools the feature set relies on: window/input control, silent+flash screenshots,
+# media control, audio, PDF text, desktop notifications.
+if [ "$OS_NAME" = "linux" ]; then
+    APT_PKGS="git xdotool ydotool wtype gnome-screenshot playerctl wmctrl ffmpeg poppler-utils libnotify-bin xdg-utils x11-xserver-utils portaudio19-dev python3-venv"
+    if command -v apt-get >/dev/null 2>&1; then
+        yellow "Installing via apt (sudo password may be required)..."
+        sudo apt-get update -qq 2>/dev/null || true
+        sudo apt-get install -y $APT_PKGS 2>/dev/null && green "✓ System tools installed" \
+            || yellow "⚠ Some apt packages failed — install manually: sudo apt install $APT_PKGS"
+    elif command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y git xdotool ydotool wtype gnome-screenshot playerctl wmctrl ffmpeg poppler-utils libnotify portaudio-devel 2>/dev/null \
+            && green "✓ System tools installed" || yellow "⚠ Install manually with dnf."
+    elif command -v pacman >/dev/null 2>&1; then
+        sudo pacman -S --noconfirm git xdotool ydotool wtype gnome-screenshot playerctl wmctrl ffmpeg poppler libnotify portaudio 2>/dev/null \
+            && green "✓ System tools installed" || yellow "⚠ Install manually with pacman."
+    else
+        yellow "Unknown package manager — install manually: $APT_PKGS"
     fi
-}
-
-check_cmd git
-[ "$OS_NAME" = "linux" ] && check_cmd xdg-open
-[ "$OS_NAME" = "linux" ] && check_cmd xhost
-
-if [ -n "$MISSING_SYS" ]; then
-    yellow "Missing system tools: $MISSING_SYS"
-    yellow "On Ubuntu/Debian:  sudo apt install $MISSING_SYS portaudio19-dev"
-    yellow "On Fedora:         sudo dnf install $MISSING_SYS portaudio-devel"
-    yellow "On macOS:          brew install $MISSING_SYS portaudio"
-    yellow "Continuing — but Jarvis may not work fully until these are installed."
+else  # macOS
+    if command -v brew >/dev/null 2>&1; then
+        yellow "Installing via Homebrew..."
+        brew install git playerctl ffmpeg poppler portaudio 2>/dev/null || true
+        green "✓ Homebrew tools installed (screenshot/window control are native on macOS)"
+    else
+        yellow "Homebrew not found. Install it from https://brew.sh, then: brew install git ffmpeg poppler portaudio"
+    fi
 fi
 
 # ── 3. clone or update repo ──────────────────────────────────────────────────
@@ -144,6 +152,10 @@ else
     cat > "$CONFIG_FILE" <<JSON
 {
     "gemini_api_key": "$GEMINI_KEY",
+    "openai_api_key": "",
+    "anthropic_api_key": "",
+    "groq_api_key": "",
+    "backend": "auto",
     "live_model": "",
     "os_system": "$OS_NAME"
 }

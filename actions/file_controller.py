@@ -108,14 +108,31 @@ def _get_videos() -> Path:
 
 
 def _resolve_path(raw: str) -> Path:
+    desktop, downloads = _get_desktop(), _get_downloads()
+    documents, pictures = _get_documents(), _get_pictures()
+    music, videos, home = _get_music(), _get_videos(), Path.home()
+    # English + Uzbek + Russian aliases so the model can pass any of them.
     shortcuts: dict[str, Path] = {
-        "desktop":   _get_desktop(),
-        "downloads": _get_downloads(),
-        "documents": _get_documents(),
-        "pictures":  _get_pictures(),
-        "music":     _get_music(),
-        "videos":    _get_videos(),
-        "home":      Path.home(),
+        # Desktop
+        "desktop": desktop, "ish stoli": desktop, "ishstoli": desktop,
+        "ish stolim": desktop, "ish stolida": desktop, "stol": desktop,
+        "rabochiy stol": desktop, "рабочий стол": desktop, "рабочий": desktop,
+        # Downloads
+        "downloads": downloads, "yuklamalar": downloads, "yuklanmalar": downloads,
+        "yuklab olingan": downloads, "yuklanma": downloads, "загрузки": downloads,
+        # Documents
+        "documents": documents, "hujjatlar": documents, "hujjat": documents,
+        "dokumentlar": documents, "документы": documents,
+        # Pictures
+        "pictures": pictures, "rasmlar": pictures, "suratlar": pictures,
+        "rasm": pictures, "изображения": pictures,
+        # Music
+        "music": music, "musiqa": music, "musiqalar": music, "музыка": music,
+        # Videos
+        "videos": videos, "videolar": videos, "video": videos, "видео": videos,
+        # Home
+        "home": home, "uy": home, "bosh papka": home, "asosiy papka": home,
+        "домашняя папка": home,
     }
     lower = raw.strip().lower()
     if lower in shortcuts:

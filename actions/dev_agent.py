@@ -16,24 +16,26 @@ BASE_DIR         = get_base_dir()
 API_CONFIG_PATH  = BASE_DIR / "config" / "api_keys.json"
 PROJECTS_DIR     = Path.home() / "Desktop" / "JarvisProjects"
 MAX_FIX_ATTEMPTS = 5
-MODEL_PLANNER    = "gemini-2.5-flash"
-MODEL_WRITER     = "gemini-2.5-flash"
+MODEL_PLANNER    = "llama-3.3-70b-versatile"
+MODEL_WRITER     = "llama-3.3-70b-versatile"
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+        return json.load(f)["openai_api_key"]
 
 
-def _gemini_client():
-    from google import genai
-    return genai.Client(api_key=_get_api_key())
+def _openai_client():
+    from actions.openai_client import get_client
+    return get_client()
 
 
 def _generate(prompt: str, model_name: str) -> str:
-    return _gemini_client().models.generate_content(
+    client = _openai_client()
+    resp = client.chat.completions.create(
         model=model_name,
-        contents=prompt,
-    ).text
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return resp.choices[0].message.content or ""
 
 
 def _strip_fences(text: str) -> str:

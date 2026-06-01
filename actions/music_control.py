@@ -16,30 +16,85 @@ def _playerctl(*args, player: str = "") -> tuple[bool, str]:
         return False, str(e)
 
 
+
+def _mpris_via_dbus(action: str, player_filter: str = "") -> tuple[bool, str]:
+    """MPRIS control via gdbus — works without playerctl installed."""
+    import re as _re
+    try:
+        r = subprocess.run(
+            ["gdbus", "call", "--session",
+             "--dest", "org.freedesktop.DBus",
+             "--object-path", "/org/freedesktop/DBus",
+             "--method", "org.freedesktop.DBus.ListNames"],
+            capture_output=True, text=True, timeout=5
+        )
+        if r.returncode != 0:
+            return False, "D-Bus unavailable"
+        players = _re.findall(r"'(org\.mpris\.MediaPlayer2\.[^']+)'", r.stdout)
+        if not players:
+            return False, "No MPRIS media players found"
+        target = players[0]
+        if player_filter:
+            for p in players:
+                if player_filter.lower() in p.lower():
+                    target = p
+                    break
+        method_map = {
+            "play": "Play", "pause": "Pause", "play_pause": "PlayPause",
+            "play-pause": "PlayPause", "stop": "Stop",
+            "next": "Next", "previous": "Previous",
+        }
+        method = method_map.get(action.lower())
+        if not method:
+            return False, f"Unknown MPRIS action: {action}"
+        r2 = subprocess.run(
+            ["gdbus", "call", "--session",
+             "--dest", target,
+             "--object-path", "/org/mpris/MediaPlayer2",
+             "--method", f"org.mpris.MediaPlayer2.Player.{method}"],
+            capture_output=True, text=True, timeout=5
+        )
+        return r2.returncode == 0, target
+    except Exception as e:
+        return False, str(e)
+
+
 def music_control(action: str, query: str = "", volume: int = -1, player: str = "") -> str:
 
     if action == "play":
         ok, out = _playerctl("play", player=player)
+        if not ok and "not installed" in out:
+            ok, out = _mpris_via_dbus("play", player)
         return "Playing." if ok else f"Nothing to play. {out}"
 
     elif action == "pause":
         ok, out = _playerctl("pause", player=player)
+        if not ok and "not installed" in out:
+            ok, out = _mpris_via_dbus("pause", player)
         return "Paused." if ok else f"Could not pause. {out}"
 
     elif action == "play_pause":
         ok, out = _playerctl("play-pause", player=player)
+        if not ok and "not installed" in out:
+            ok, out = _mpris_via_dbus("play_pause", player)
         return "Toggled play/pause." if ok else out
 
     elif action == "next":
         ok, out = _playerctl("next", player=player)
+        if not ok and "not installed" in out:
+            ok, out = _mpris_via_dbus("next", player)
         return "Next track." if ok else out
 
     elif action == "previous":
         ok, out = _playerctl("previous", player=player)
+        if not ok and "not installed" in out:
+            ok, out = _mpris_via_dbus("previous", player)
         return "Previous track." if ok else out
 
     elif action == "stop":
         ok, out = _playerctl("stop", player=player)
+        if not ok and "not installed" in out:
+            ok, out = _mpris_via_dbus("stop", player)
         return "Stopped." if ok else out
 
     elif action == "volume":

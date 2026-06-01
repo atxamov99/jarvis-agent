@@ -24,12 +24,15 @@ API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+        return json.load(f)["openai_api_key"]
+
+
+def _openai_client():
+    from openai import OpenAI
+    return OpenAI(api_key=_get_api_key())
+
 
 def _run_generated_code(description: str, speak: Callable | None = None) -> str:
-    from google import genai
-    from google.genai import types
-
     if speak:
         speak("Writing custom code for this task, sir.")
 
@@ -47,28 +50,34 @@ def _run_generated_code(description: str, speak: Callable | None = None) -> str:
         except Exception:
             pass
 
-    client = genai.Client(api_key=_get_api_key())
+    client = _openai_client()
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"Write Python code to accomplish this task:\n\n{description}",
-            config=types.GenerateContentConfig(
-                system_instruction=(
-                    "You are an expert Python developer. "
-                    "Write clean, complete, working Python code. "
-                    "Use standard library + common packages. "
-                    "Install missing packages with subprocess + pip if needed. "
-                    "Return ONLY the Python code. No explanation, no markdown, no backticks.\n\n"
-                    f"SYSTEM PATHS:\n"
-                    f"  Desktop   = r'{desktop}'\n"
-                    f"  Downloads = r'{downloads}'\n"
-                    f"  Documents = r'{documents}'\n"
-                    f"  Home      = r'{home}'\n"
-                ),
-            ),
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an expert Python developer. "
+                        "Write clean, complete, working Python code. "
+                        "Use standard library + common packages. "
+                        "Install missing packages with subprocess + pip if needed. "
+                        "Return ONLY the Python code. No explanation, no markdown, no backticks.\n\n"
+                        f"SYSTEM PATHS:\n"
+                        f"  Desktop   = r'{desktop}'\n"
+                        f"  Downloads = r'{downloads}'\n"
+                        f"  Documents = r'{documents}'\n"
+                        f"  Home      = r'{home}'\n"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Write Python code to accomplish this task:\n\n{description}",
+                },
+            ],
         )
-        code = response.text.strip()
+        code = response.choices[0].message.content.strip()
         code = re.sub(r"```(?:python)?", "", code).strip().rstrip("`").strip()
 
         with tempfile.NamedTemporaryFile(
@@ -108,6 +117,7 @@ def _run_generated_code(description: str, speak: Callable | None = None) -> str:
     except Exception as e:
         raise RuntimeError(f"Generated code failed: {e}")
 
+
 def _inject_context(params: dict, tool: str, step_results: dict, goal: str = "") -> dict:
     if not step_results:
         return params
@@ -128,19 +138,25 @@ def _inject_context(params: dict, tool: str, step_results: dict, goal: str = "")
                 print(f"[Executor] 💉 Injected + translated content")
 
     return params
+
+
 def _detect_language(text: str) -> str:
-    from google import genai
-    client = genai.Client(api_key=_get_api_key())
+    client = _openai_client()
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=(
-                f"What language is this text written in? "
-                f"Reply with ONLY the language name in English (e.g. Turkish, English, French).\n\n"
-                f"Text: {text[:200]}"
-            ),
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"What language is this text written in? "
+                        f"Reply with ONLY the language name in English (e.g. Turkish, English, French).\n\n"
+                        f"Text: {text[:200]}"
+                    ),
+                }
+            ],
         )
-        return response.text.strip()
+        return response.choices[0].message.content.strip()
     except Exception:
         return "English"
 
@@ -149,32 +165,35 @@ def _translate_to_goal_language(content: str, goal: str) -> str:
     if not goal:
         return content
     try:
-        from google import genai
-        client = genai.Client(api_key=_get_api_key())
-
+        client = _openai_client()
         target_lang = _detect_language(goal)
         print(f"[Executor] 🌐 Translating to: {target_lang}")
 
-        prompt = (
-            f"You are a professional translator. "
-            f"Translate the following text into {target_lang}.\n"
-            f"IMPORTANT:\n"
-            f"- Translate EVERYTHING, leave nothing in English\n"
-            f"- Keep all facts, numbers, and data intact\n"
-            f"- Keep the structure and formatting\n"
-            f"- Output ONLY the translated text, nothing else\n\n"
-            f"Text to translate:\n{content[:4000]}"
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You are a professional translator. "
+                        f"Translate the following text into {target_lang}.\n"
+                        f"IMPORTANT:\n"
+                        f"- Translate EVERYTHING, leave nothing in English\n"
+                        f"- Keep all facts, numbers, and data intact\n"
+                        f"- Keep the structure and formatting\n"
+                        f"- Output ONLY the translated text, nothing else"
+                    ),
+                },
+                {"role": "user", "content": content[:4000]},
+            ],
         )
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
-        translated = response.text.strip()
+        translated = response.choices[0].message.content.strip()
         print(f"[Executor] ✅ Translation done ({target_lang})")
         return translated
     except Exception as e:
         print(f"[Executor] ⚠️ Translation failed: {e}")
         return content
+
 
 def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
 
@@ -251,6 +270,7 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
         print(f"[Executor] ⚠️ Unknown tool '{tool}' — falling back to generated_code")
         return _run_generated_code(f"Accomplish this task: {parameters}", speak=speak)
 
+
 class AgentExecutor:
 
     MAX_REPLAN_ATTEMPTS = 2
@@ -265,7 +285,7 @@ class AgentExecutor:
 
         replan_attempts = 0
         completed_steps = []
-        step_results    = {} 
+        step_results    = {}
         plan            = create_plan(goal)
 
         while True:
@@ -302,7 +322,7 @@ class AgentExecutor:
                         break
                     try:
                         result = _call_tool(tool, params, speak)
-                        step_results[step_num] = result 
+                        step_results[step_num] = result
                         completed_steps.append(step)
                         print(f"[Executor] ✅ Step {step_num} done: {str(result)[:100]}")
                         step_ok = True
@@ -335,7 +355,7 @@ class AgentExecutor:
                             if speak: speak(msg)
                             return msg
 
-                        else: 
+                        else:
                             fix_suggestion = recovery.get("fix_suggestion", "")
                             if fix_suggestion and tool != "generated_code":
                                 try:
@@ -382,20 +402,23 @@ class AgentExecutor:
     def _summarize(self, goal: str, completed_steps: list, speak: Callable | None) -> str:
         fallback = f"All done, sir. Completed {len(completed_steps)} steps for: {goal[:60]}."
         try:
-            from google import genai
-            client    = genai.Client(api_key=_get_api_key())
+            client    = _openai_client()
             steps_str = "\n".join(f"- {s.get('description', '')}" for s in completed_steps)
-            prompt    = (
-                f'User goal: "{goal}"\n'
-                f"Completed steps:\n{steps_str}\n\n"
-                "Write a single natural sentence summarizing what was accomplished. "
-                "Address the user as 'sir'. Be direct and positive."
+            response  = client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f'User goal: "{goal}"\n'
+                            f"Completed steps:\n{steps_str}\n\n"
+                            "Write a single natural sentence summarizing what was accomplished. "
+                            "Address the user as 'sir'. Be direct and positive."
+                        ),
+                    }
+                ],
             )
-            response = client.models.generate_content(
-                model="gemini-2.5-flash-lite",
-                contents=prompt,
-            )
-            summary = response.text.strip()
+            summary = response.choices[0].message.content.strip()
             if speak: speak(summary)
             return summary
         except Exception:

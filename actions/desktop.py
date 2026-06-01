@@ -26,7 +26,7 @@ def _get_base_dir() -> Path:
 def _get_api_key() -> str:
     path = _get_base_dir() / "config" / "api_keys.json"
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+        return json.load(f)["openai_api_key"]
     
 def _get_desktop() -> Path:
     if _OS == "Linux":
@@ -102,9 +102,8 @@ def _execute_generated_code(code: str, player=None) -> str:
 
 
 def _ask_gemini_for_desktop_action(task: str) -> str:
-
-    from google import genai
-    client = genai.Client(api_key=_get_api_key())
+    from actions.openai_client import get_client
+    client = get_client()
 
     desktop = str(_get_desktop())
 
@@ -142,8 +141,11 @@ Output ONLY the Python code. No explanation, no markdown, no backticks.
 Task: {task}"""
 
     try:
-        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        code = response.text.strip()
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        code = response.choices[0].message.content.strip()
         if code.startswith("```"):
             lines = code.split("\n")
             code  = "\n".join(lines[1:-1]).strip()

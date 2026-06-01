@@ -1,18 +1,11 @@
-"""ocr.py — Extract text from screen/image via Gemini Vision."""
+"""ocr.py — Extract text from screen/image via OpenAI Vision."""
+import base64
 import json
 import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-
-
-def _load_gemini_key() -> str | None:
-    cfg = Path(__file__).parent.parent / "config" / "api_keys.json"
-    try:
-        return json.loads(cfg.read_text())["gemini_api_key"]
-    except Exception:
-        return None
 
 
 def _take_screenshot() -> Path | None:
@@ -30,35 +23,49 @@ def _take_screenshot() -> Path | None:
     return None
 
 
-def _gemini_ocr(image_path: Path, prompt: str) -> str:
-    import base64
-    from google import genai
-    from google.genai import types
+def _openai_ocr(image_path: Path, prompt: str) -> str:
+    from actions.openai_client import _load_config
+    cfg = _load_config()
 
-    key = _load_gemini_key()
-    if not key:
-        return "Gemini API kaliti topilmadi."
-
-    client = genai.Client(api_key=key)
     with open(image_path, "rb") as f:
         img_bytes = f.read()
-
     img_b64 = base64.b64encode(img_bytes).decode()
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=[
-            types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
-            prompt,
-        ],
-    )
-    text = response.text or ""
-    return text.strip() if text.strip() else "Matn topilmadi."
+
+    # OpenAI birlamchi
+    openai_key = cfg.get("openai_api_key", "")
+    if openai_key:
+        from openai import OpenAI
+        client = OpenAI(api_key=openai_key)
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+                {"type": "text", "text": prompt},
+            ]}],
+        )
+        text = response.choices[0].message.content or ""
+        return text.strip() if text.strip() else "Matn topilmadi."
+
+    # Gemini zaxira
+    gemini_key = cfg.get("gemini_api_key", "")
+    if gemini_key:
+        from google import genai
+        from google.genai import types as gtypes
+        client = genai.Client(api_key=gemini_key)
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[gtypes.Part.from_bytes(data=img_bytes, mime_type="image/png"), prompt],
+        )
+        text = response.text or ""
+        return text.strip() if text.strip() else "Matn topilmadi."
+
+    return "OCR uchun OpenAI yoki Gemini API kaliti kerak."
 
 
 def ocr(parameters=None, response=None, player=None, session_memory=None) -> str:
-    params    = parameters or {}
+    params         = parameters or {}
     image_path_str = (params.get("image_path") or "").strip()
-    mode      = (params.get("mode") or "extract").lower().strip()
+    mode           = (params.get("mode") or "extract").lower().strip()
 
     prompts = {
         "extract":   "Extract and return ALL text visible in this image exactly as it appears.",
@@ -79,7 +86,7 @@ def ocr(parameters=None, response=None, player=None, session_memory=None) -> str
             return "Skrinshot olishda xato. gnome-screenshot, scrot, yoki grim o'rnatilgan bo'lsin."
 
     try:
-        result = _gemini_ocr(image_path, prompt)
+        result = _openai_ocr(image_path, prompt)
     finally:
         if not image_path_str and image_path and image_path.exists():
             image_path.unlink(missing_ok=True)

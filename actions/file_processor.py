@@ -25,27 +25,38 @@ import tempfile
 from pathlib import Path
 from datetime import datetime
 
-from google import genai
-from google.genai import types
-
-_GEMINI_MODEL = "gemini-2.5-flash"
+_OPENAI_MODEL = "llama-3.3-70b-versatile"
 
 
 def _get_api_key() -> str:
     config_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
     with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+        return json.load(f)["openai_api_key"]
 
 
-def _gemini_client() -> "genai.Client":
-    return genai.Client(api_key=_get_api_key())
+def _openai_client():
+    from actions.openai_client import get_client
+    return get_client()
 
 
 def _generate(contents) -> str:
-    return _gemini_client().models.generate_content(
-        model=_GEMINI_MODEL,
-        contents=contents,
-    ).text.strip()
+    client = _openai_client()
+    if isinstance(contents, list):
+        # Image+text: build vision message
+        import base64
+        parts = []
+        for item in contents:
+            if hasattr(item, 'data'):
+                b64 = base64.b64encode(item.data).decode()
+                mt = getattr(item, 'mime_type', 'image/png')
+                parts.append({"type": "image_url", "image_url": {"url": f"data:{mt};base64,{b64}"}})
+            else:
+                parts.append({"type": "text", "text": str(item)})
+        messages = [{"role": "user", "content": parts}]
+    else:
+        messages = [{"role": "user", "content": str(contents)}]
+    resp = client.chat.completions.create(model=_OPENAI_MODEL, messages=messages)
+    return (resp.choices[0].message.content or "").strip()
 
 
 def _detect_type(path: Path) -> str:

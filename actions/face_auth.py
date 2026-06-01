@@ -9,11 +9,16 @@ def face_auth(parameters=None, response=None, player=None, session_memory=None) 
     cam_index = int(params.get("cam", 0))
     threshold = params.get("threshold")
 
-    if not face_verifier.is_available():
-        return (
-            "face_recognition kutubxonasi o'rnatilmagan.\n"
-            "`pip install face-recognition` qiling (dlib kerak)."
-        )
+    # ── PREVIEW (jonli kamera oynasi — ko'zgu) ────────────────────────────────
+    if action in ("preview", "ko'rsat", "korsat", "kamera", "yuz_kor"):
+        if player and hasattr(player, "open_preview_window"):
+            player.open_preview_window(cam_index)
+            return "📷 Kamera oynasi ochildi."
+        return "📷 UI mavjud emas."
+
+    if action in ("preview_stop", "kamera_yop", "oyna_yop"):
+        # Preview window closes itself; just a confirmation message
+        return "📷 Kamera oynasini o'z X tugmasidan yoping."
 
     # ── STATUS ────────────────────────────────────────────────────────────────
     if action in ("status", "holat"):
@@ -21,12 +26,13 @@ def face_auth(parameters=None, response=None, player=None, session_memory=None) 
 
     # ── ENROLL ────────────────────────────────────────────────────────────────
     if action in ("enroll", "o'rgat", "esla", "yodla"):
-        if seconds < 3:
-            seconds = 3
-        if seconds > 30:
-            seconds = 30
-        if player: player.write_log(f"[FaceAuth] Starting {seconds}s enrollment...")
-        return face_verifier.enroll(seconds=seconds, cam_index=cam_index, player=player)
+        if player and hasattr(player, "open_enroll_dialog"):
+            player.open_enroll_dialog(cam_index)
+            return "📷 Yuz ro'yxatdan o'tkazish oynasi ochildi."
+        # Fallback: silent enrollment if no UI
+        return face_verifier.enroll(seconds=max(3, min(seconds, 30)),
+                                    cam_index=cam_index, player=player,
+                                    show_preview=False)
 
     # ── VERIFY (manual one-shot check) ────────────────────────────────────────
     if action in ("verify", "tekshir", "kim"):

@@ -1361,9 +1361,12 @@ class NotificationsPanel(QWidget):
 
 
 class MainWindow(QMainWindow):
-    _log_sig   = pyqtSignal(str)
-    _state_sig = pyqtSignal(str)
-    _mute_sig  = pyqtSignal(bool)
+    _log_sig     = pyqtSignal(str)
+    _state_sig   = pyqtSignal(str)
+    _mute_sig    = pyqtSignal(bool)
+    _enroll_sig  = pyqtSignal(int)   # cam_index → open FaceEnrollDialog
+    _preview_sig = pyqtSignal(int)   # cam_index → open FacePreviewWindow
+    _voice_sig   = pyqtSignal()      # refresh Voice ID button after async enroll
 
     def __init__(self, face_path: str):
         super().__init__()
@@ -1458,6 +1461,9 @@ class MainWindow(QMainWindow):
         self._log_sig.connect(self.syslog_append)
         self._state_sig.connect(self._apply_state)
         self._mute_sig.connect(self._set_muted_safe)
+        self._enroll_sig.connect(self._open_enroll_dialog)
+        self._preview_sig.connect(self._open_preview_window)
+        self._voice_sig.connect(self._style_voice_btn)
 
         self._overlay: SetupOverlay | None = None
         self._ready = self._check_config()
@@ -1540,6 +1546,16 @@ class MainWindow(QMainWindow):
             act_mute.triggered.connect(self._toggle_mute)
             menu.addAction(act_mute)
 
+            self._act_face = QAction("Face ID: OFF", self)
+            self._act_face.triggered.connect(self._toggle_face_id)
+            menu.addAction(self._act_face)
+            self._refresh_face_id_label()
+
+            self._act_voice = QAction("Voice ID: OFF", self)
+            self._act_voice.triggered.connect(self._toggle_voice_id)
+            menu.addAction(self._act_voice)
+            self._refresh_voice_id_label()
+
             menu.addSeparator()
 
             act_quit = QAction("Quit JARVIS", self)
@@ -1554,6 +1570,36 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"[UI] System tray init failed: {e}")
             return False
+
+    def _toggle_face_id(self):
+        """Toggle phone-style Face ID protection ON/OFF (tray + visible button)."""
+        ui = getattr(self, "_jarvis_ui", None)
+        if ui is not None:
+            ui.toggle_face_id()
+        self._refresh_face_id_label()
+        self._style_face_btn()
+
+    def _refresh_face_id_label(self):
+        try:
+            import core.face_verifier as fv
+            if getattr(self, "_act_face", None) is not None:
+                self._act_face.setText(
+                    "Face ID: ON  🔒" if fv.is_active() else "Face ID: OFF  🔓"
+                )
+        except Exception:
+            pass
+
+    def _post_enroll(self):
+        """After enrollment finishes: if Face ID is ON, start the watcher."""
+        try:
+            import core.face_verifier as fv
+            if fv.is_active() and fv.is_enabled():
+                ui = getattr(self, "_jarvis_ui", None)
+                fv.start_face_watcher(ui, cam_index=0)
+            self._refresh_face_id_label()
+            self._style_face_btn()
+        except Exception as e:
+            print(f"[UI] post-enroll error: {e}")
 
     def _on_tray_activated(self, reason):
         try:
@@ -2268,6 +2314,22 @@ class MainWindow(QMainWindow):
         self._style_mute_btn()
         lay.addWidget(self._mute_btn)
 
+        self._face_btn = QPushButton("🙂  FACE ID: OFF")
+        self._face_btn.setFixedHeight(30)
+        self._face_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._face_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._face_btn.clicked.connect(self._toggle_face_id)
+        self._style_face_btn()
+        lay.addWidget(self._face_btn)
+
+        self._voice_btn = QPushButton("🎙  VOICE ID: OFF")
+        self._voice_btn.setFixedHeight(30)
+        self._voice_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._voice_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._voice_btn.clicked.connect(self._toggle_voice_id)
+        self._style_voice_btn()
+        lay.addWidget(self._voice_btn)
+
         fs_btn = QPushButton("⛶  FULLSCREEN  [F11]")
         fs_btn.setFixedHeight(26)
         fs_btn.setFont(QFont("Courier New", 7))
@@ -2390,6 +2452,103 @@ class MainWindow(QMainWindow):
         if v != self._muted:
             self._toggle_mute()
 
+    def _open_preview_window(self, cam_index: int):
+        from core.face_preview_window import FacePreviewWindow
+        self._preview_win = FacePreviewWindow(cam_index=cam_index, parent=None)
+        self._preview_win.show()
+        self._preview_win.raise_()
+        self._preview_win.activateWindow()
+
+    def _open_enroll_dialog(self, cam_index: int):
+        from core.face_enroll_dialog import FaceEnrollDialog
+        self._enroll_dlg = FaceEnrollDialog(cam_index=cam_index, parent=None)
+        self._enroll_dlg.setWindowFlags(
+            self._enroll_dlg.windowFlags() |
+            __import__('PyQt6.QtCore', fromlist=['Qt']).Qt.WindowType.Window
+        )
+        self._enroll_dlg.enrollment_done.connect(
+            lambda msg: (self._log_sig.emit(f"📷 {msg}"), self._post_enroll())
+        )
+        self._enroll_dlg.show()
+        self._enroll_dlg.raise_()
+        self._enroll_dlg.activateWindow()
+
+    def _style_face_btn(self):
+        if getattr(self, "_face_btn", None) is None:
+            return
+        import core.face_verifier as fv
+        if fv.is_active():
+            self._face_btn.setText("🔒  FACE ID: ON")
+            self._face_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: #00140a; color: {C.GREEN};
+                    border: 1px solid {C.GREEN}; border-radius: 3px;
+                }}
+                QPushButton:hover {{ background: #001f10; }}
+            """)
+        else:
+            self._face_btn.setText("🙂  FACE ID: OFF")
+            self._face_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent; color: {C.TEXT_MED};
+                    border: 1px solid {C.BORDER}; border-radius: 3px;
+                }}
+                QPushButton:hover {{ background: #0a0a0a; color: {C.PRI}; }}
+            """)
+
+    def _toggle_voice_id(self):
+        """Toggle owner-only voice mode (enroll first if no voice profile yet)."""
+        ui = getattr(self, "_jarvis_ui", None)
+        if ui is not None:
+            ui.toggle_voice_id()
+        self._style_voice_btn()
+
+    def _refresh_voice_id_label(self):
+        try:
+            import core.speaker_verifier as sv
+            if getattr(self, "_act_voice", None) is not None:
+                if sv.is_enabled() and sv.is_active():
+                    self._act_voice.setText("Voice ID: ON  🔒")
+                elif sv.is_enabled():
+                    self._act_voice.setText("Voice ID: PAUSED")
+                else:
+                    self._act_voice.setText("Voice ID: OFF (enroll)")
+        except Exception:
+            pass
+
+    def _style_voice_btn(self):
+        self._refresh_voice_id_label()
+        if getattr(self, "_voice_btn", None) is None:
+            return
+        import core.speaker_verifier as sv
+        if sv.is_enabled() and sv.is_active():
+            self._voice_btn.setText("🔒  VOICE ID: ON")
+            self._voice_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: #00140a; color: {C.GREEN};
+                    border: 1px solid {C.GREEN}; border-radius: 3px;
+                }}
+                QPushButton:hover {{ background: #001f10; }}
+            """)
+        elif sv.is_enabled() and not sv.is_active():
+            self._voice_btn.setText("⏸  VOICE ID: PAUSED")
+            self._voice_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: #14100a; color: {C.ACC2};
+                    border: 1px solid {C.ACC2}; border-radius: 3px;
+                }}
+                QPushButton:hover {{ background: #1f1810; }}
+            """)
+        else:
+            self._voice_btn.setText("🎙  VOICE ID: OFF")
+            self._voice_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent; color: {C.TEXT_MED};
+                    border: 1px solid {C.BORDER}; border-radius: 3px;
+                }}
+                QPushButton:hover {{ background: #0a0a0a; color: {C.PRI}; }}
+            """)
+
     def _style_mute_btn(self):
         if self._muted:
             self._mute_btn.setText("🔇  MICROPHONE MUTED")
@@ -2438,7 +2597,7 @@ class MainWindow(QMainWindow):
         if not API_FILE.exists(): return False
         try:
             d = json.loads(API_FILE.read_text(encoding="utf-8"))
-            return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))
+            return bool(d.get("openai_api_key") or d.get("gemini_api_key")) and bool(d.get("os_system"))
         except Exception:
             return False
 
@@ -2458,7 +2617,7 @@ class MainWindow(QMainWindow):
     def _on_setup_done(self, key: str, os_name: str):
         os.makedirs(CONFIG_DIR, exist_ok=True)
         API_FILE.write_text(
-            json.dumps({"gemini_api_key": key, "os_system": os_name}, indent=4),
+            json.dumps({"openai_api_key": key, "os_system": os_name}, indent=4),
             encoding="utf-8",
         )
         self._ready = True
@@ -2485,6 +2644,7 @@ class JarvisUI:
         # window is closed — Jarvis must keep listening in the background.
         self._app.setQuitOnLastWindowClosed(False)
         self._win = MainWindow(face_path)
+        self._win._jarvis_ui = self   # back-ref so tray toggle reaches set_face_id
         self._win.show()
         self.root = _RootShim(self._app)
 
@@ -2522,6 +2682,72 @@ class JarvisUI:
 
     def push_notification(self, text: str):
         self._win.push_notification(text)
+
+    def open_preview_window(self, cam_index: int = 0):
+        """Thread-safe: opens live camera preview on the main Qt thread."""
+        self._win._preview_sig.emit(cam_index)
+
+    def open_enroll_dialog(self, cam_index: int = 0):
+        """Thread-safe: opens FaceEnrollDialog on the main Qt thread via signal."""
+        self._win._enroll_sig.emit(cam_index)
+
+    def set_face_id(self, active: bool) -> str:
+        """Turn phone-style Face ID protection ON/OFF (persisted across restarts)."""
+        import core.face_verifier as fv
+        result = fv.set_active(active, ui=self)
+        if result == "no_profile":
+            self.write_log("📷 Face ID YONDI — yuz profili yo'q, ro'yxatdan o'tkazilmoqda...")
+            self.open_enroll_dialog(cam_index=0)
+        elif result == "on":
+            self.write_log("🔒 Face ID YONDI — yuz tasdiqlanmaguncha ovoz bloklanadi.")
+        elif result == "off":
+            self.write_log("🔓 Face ID O'CHDI — kamera o'chdi, mikrofon doim faol.")
+        return result
+
+    def toggle_face_id(self) -> str:
+        """Flip the Face ID toggle to the opposite of its current state."""
+        import core.face_verifier as fv
+        return self.set_face_id(not fv.is_active())
+
+    def toggle_voice_id(self):
+        """Owner-only voice mode. Enroll on first use, then toggle ON/OFF."""
+        import core.speaker_verifier as sv
+        if not sv.is_enabled():
+            self.enroll_voice()
+            return
+        new_active = not sv.is_active()
+        sv.set_active(new_active)
+        if new_active:
+            self.write_log("🔒 Voice ID YONDI — Jarvis faqat sizning ovozingizga javob beradi.")
+        else:
+            self.write_log("🔓 Voice ID O'CHDI — barcha ovozlarni qabul qiladi.")
+        self._win._voice_sig.emit()
+
+    def enroll_voice(self, seconds: int = 15):
+        """Record the owner's voice and build a calibrated profile.
+
+        The main mic pipeline is muted during recording so Jarvis doesn't react
+        to the enrollment speech; the previous mute state is restored afterward.
+        """
+        import threading
+
+        def _run():
+            from actions.voice_auth import voice_auth as _va
+            prev_muted = self.muted
+            self.muted = True
+            self.write_log(
+                f"🎙 Voice ID: {seconds} soniya tinmay gapiring "
+                "(masalan, o'zingiz haqingizda) — ovozingiz yodlanmoqda..."
+            )
+            try:
+                msg = _va({"action": "enroll", "seconds": seconds}, player=self)
+            except Exception as e:
+                msg = f"Enrollment xatosi: {e}"
+            self.write_log(f"🎙 {msg}")
+            self.muted = prev_muted
+            self._win._voice_sig.emit()
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def start_speaking(self):
         self.set_state("SPEAKING")

@@ -90,8 +90,42 @@ from actions.cron_manager      import cron_manager as cron_action
 from actions.voice_auth        import voice_auth as voice_auth_action
 from actions.face_auth         import face_auth as face_auth_action
 from actions.samsung_tv        import samsung_tv as samsung_tv_action
+from actions.type_text         import type_text as type_text_action
+from actions.wikipedia         import wikipedia as wikipedia_action
+from actions.news              import news as news_action
+from actions.dictation         import dictation as dictation_action
+from actions.joke              import joke as joke_action
+from actions.dictionary        import dictionary as dictionary_action
+from actions.timezone          import timezone as timezone_action
+from actions.crypto            import crypto as crypto_action
+from actions.stocks            import stocks as stocks_action
+from actions.health_calc       import health_calc as health_calc_action
+from actions.unit_converter    import unit_converter as unit_converter_action
+from actions.url_tools         import url_tools as url_tools_action
+from actions.lyrics            import lyrics as lyrics_action
+from actions.movie             import movie as movie_action
+from actions.email_send        import email_send as email_action
+from actions.timer             import timer as timer_action
+from actions.briefing          import briefing as briefing_action
+from actions.contacts          import contacts as contacts_action
+from actions.math_solver       import math_solver as math_solver_action
+from actions.reddit            import reddit as reddit_action
+from actions.emotion           import emotion as emotion_action
+from actions.gesture_control   import gesture_control as gesture_action
+from actions.webcam_vision     import webcam_vision as webcam_vision_action
+from actions.smart_memory      import smart_memory as smart_memory_action
+from actions.screen_vision      import screen_vision as screen_vision_action
+from actions.screen_click       import screen_click as screen_click_action
+from actions.doc_chat           import doc_chat as doc_chat_action
+from actions.window_manager     import window_manager as window_manager_action
+from actions.auto_agent         import auto_agent as auto_agent_action
+from actions.watcher            import watcher as watcher_action
+from actions.research           import research as research_action
+import actions.time_machine as time_machine
+from actions.time_machine        import time_machine as time_machine_action
 import core.speaker_verifier as speaker_verifier
 import core.face_verifier as face_verifier
+import core.stt_context as stt_context
 
 try:
     from actions.wake_word import WakeWordDetector
@@ -154,9 +188,9 @@ LIVE_MODEL = _load_live_model()
 
 # Noise gate — filters background noise, knocks, brief transients
 # Each frame = CHUNK_SIZE/SEND_SAMPLE_RATE = ~64 ms
-_GATE_OPEN_RMS    = 45     # RMS level required to consider audio "active" (lowered: catches quiet voices)
-_GATE_ATTACK      = 2      # frames (~128 ms) above threshold before gate opens
-_GATE_HOLD        = 45     # frames (~2.9 s) gate stays open after level drops (extended: don't cut mid-sentence)
+_GATE_OPEN_RMS    = 60     # RMS level required to consider audio "active" (raised: reduces false activations)
+_GATE_ATTACK      = 4      # frames (~256 ms) above threshold before gate opens (raised: avoids brief transients)
+_GATE_HOLD        = 28     # frames (~1.8 s) gate stays open after level drops (lowered: faster response)
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -217,6 +251,50 @@ def _get_openai_key() -> str | None:
             return json.load(f).get("openai_api_key") or None
     except Exception:
         return None
+
+
+def _get_anthropic_key() -> str | None:
+    try:
+        with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f).get("anthropic_api_key") or None
+    except Exception:
+        return None
+
+
+def _get_backend_pref() -> str:
+    try:
+        with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return (json.load(f).get("backend") or "auto").lower().strip()
+    except Exception:
+        return "auto"
+
+
+def _to_anthropic_tools(gemini_tools: list) -> list:
+    """Convert Gemini tool declarations to Anthropic tool-use format.
+
+    Anthropic uses `input_schema` (JSON Schema, lowercase types) instead of
+    Gemini's `parameters` with uppercase OBJECT/STRING types.
+    """
+    def _fix_types(obj):
+        if isinstance(obj, dict):
+            return {
+                k: (_fix_types(v) if k != "type" else (v.lower() if isinstance(v, str) else v))
+                for k, v in obj.items()
+            }
+        if isinstance(obj, list):
+            return [_fix_types(i) for i in obj]
+        return obj
+    out = []
+    for t in gemini_tools:
+        schema = _fix_types(t.get("parameters", {"type": "object", "properties": {}}))
+        schema.setdefault("type", "object")
+        schema.setdefault("properties", {})
+        out.append({
+            "name":         t["name"],
+            "description":  t.get("description", ""),
+            "input_schema": schema,
+        })
+    return out
 
 
 def _load_system_prompt() -> str:
@@ -421,12 +499,18 @@ TOOL_DECLARATIONS = [
             "Controls any web browser. Use for: opening websites, searching the web, "
             "clicking elements, filling forms, scrolling, screenshots, navigation, any web-based task. "
             "Always pass the 'browser' parameter when the user specifies a browser (e.g. 'open in Edge', "
-            "'use Firefox', 'open Chrome'). Multiple browsers can run simultaneously."
+            "'use Firefox', 'open Chrome'). Multiple browsers can run simultaneously.\n"
+            "IMPORTANT — closing: use action='close_tab' to close just ONE tab/window "
+            "(e.g. 'bu oynani yop', 'tabni yop', 'close this tab/window'). Use action='close' "
+            "ONLY to quit the ENTIRE browser ('Chrome'ni butunlay yop', 'close the whole browser').\n"
+            "VIDEO/MUSIC on a web page (YouTube etc.): use action='media_pause' to stop, "
+            "action='media_play' to RESUME/continue ('davom ettir', 'resume', 'continue playing'), "
+            "action='media_toggle' to flip. These work on the visible tab via the page's own player."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action":      {"type": "STRING", "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | get_text | get_url | press | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"},
+                "action":      {"type": "STRING", "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | get_text | get_url | press | new_tab | close_tab (one tab) | media_play (resume video) | media_pause | media_toggle | screenshot | back | forward | reload | switch | list_browsers | close (whole browser) | close_all"},
                 "browser":     {"type": "STRING", "description": "Target browser: chrome | edge | firefox | opera | operagx | brave | vivaldi | safari. Omit to use the currently active browser."},
                 "url":         {"type": "STRING", "description": "URL for go_to / new_tab action"},
                 "query":       {"type": "STRING", "description": "Search query for search action"},
@@ -452,7 +536,12 @@ TOOL_DECLARATIONS = [
             "separated by commas, semicolons, 'va', 'and', '&' or '+' in the `name` field — the tool will operate on "
             "EACH item under the same `path`. Example: name='report.pdf, draft.md, old.txt' deletes all three from the path. "
             "Deletions go to system trash (recoverable), they are NOT permanent. Protected directories (home, Desktop, Downloads, "
-            "Documents, Pictures, Music, Videos themselves) cannot be deleted — only files/folders INSIDE them."
+            "Documents, Pictures, Music, Videos themselves) cannot be deleted — only files/folders INSIDE them.\n"
+            "USE THIS for listing/finding folders & files. Uzbek triggers: 'ish stolidagi papkalar/fayllar', "
+            "'ish stolimda nima bor', 'papkalarni ko'rsat', 'yuklamalar papkasi', 'hujjatlardagi fayllar', "
+            "'falon faylni top'. For folder shortcuts pass path='desktop' (ish stoli), 'downloads' (yuklamalar), "
+            "'documents' (hujjatlar), 'pictures', 'music', 'videos', 'home' — the tool also accepts the Uzbek/Russian "
+            "names directly (ish stoli, Рабочий стол). To list everything on the desktop: action='list', path='desktop'."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -1685,6 +1774,678 @@ TOOL_DECLARATIONS = [
             "required": ["action"]
         }
     },
+    {
+        "name": "type_text",
+        "description": (
+            "Type any text into the currently focused window (chat, form, terminal, etc). "
+            "Use when user says 'chatga yoz', 'shu textni yoz', 'quyidagini yozib ber', "
+            "'xabar yoz', 'matn kirit'. Can optionally press Enter to send. "
+            "Works with Uzbek, Russian, English text."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "text":        {"type": "STRING",
+                                "description": "The exact text to type"},
+                "send":        {"type": "STRING",
+                                "description": "true to press Enter after typing (send/yuborish)"},
+                "delay":       {"type": "INTEGER",
+                                "description": "Milliseconds between keystrokes (default 30)"},
+                "focus_delay": {"type": "NUMBER",
+                                "description": "Seconds to wait before typing (default 0.5)"},
+            },
+            "required": ["text"]
+        }
+    },
+    {
+        "name": "wikipedia",
+        "description": (
+            "Search Wikipedia and return a summary of any topic, person, place, event, or concept. "
+            "Use when user asks: 'Wikipedia dan toping', 'kim u?', 'nima bu?', "
+            "'Einstein haqida ayt', 'Python nima', 'Toshkent haqida', 'who is X', 'what is X'. "
+            "Supports English (en), Uzbek (uz), Russian (ru) Wikipedia."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query":     {"type": "STRING",
+                              "description": "Search term or topic to look up"},
+                "sentences": {"type": "INTEGER",
+                              "description": "Number of summary sentences (default 4, max 10)"},
+                "lang":      {"type": "STRING",
+                              "description": "Wikipedia language code: en (default), uz, ru"},
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "news",
+        "description": (
+            "Fetch top news headlines from trusted RSS sources (BBC, Kun.uz, HackerNews). "
+            "Use when user asks: 'yangiliklar', 'bugungi xabarlar', 'top news', 'texnologiya yangiliklari', "
+            "'dunyo yangiliklari', 'sport yangiliklari', 'sogliq yangiliklari', 'biznes yangiliklari'. "
+            "Categories: top, world, tech, science, business, sport, health, uz (Uzbek), hn (HackerNews)."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "category": {"type": "STRING",
+                             "description": "Category: top, world, tech, science, business, sport, health, uz, hn"},
+                "limit":    {"type": "INTEGER",
+                             "description": "Number of headlines to fetch (default 5, max 10)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "dictation",
+        "description": (
+            "Voice dictation mode: records user speech for N seconds, transcribes it with Whisper, "
+            "then types the result into the active window (or copies to clipboard). "
+            "Use when user says: 'diktovka boshla', 'gapimni yoz', 'nutqimni matnda yoz', "
+            "'dictate this', 'type what I say', 'ovozdan matn'. "
+            "Perfect for composing messages, emails, or documents by voice."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "seconds":  {"type": "INTEGER",
+                             "description": "How many seconds to record (default 8, max 60)"},
+                "language": {"type": "STRING",
+                             "description": "Speech language code: uz (default), en, ru"},
+                "output":   {"type": "STRING",
+                             "description": "Output mode: type (default, types in active window), clipboard, text (return only)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "joke",
+        "description": (
+            "Tells a joke, fun fact, motivational quote, or does a coin flip / dice roll / random number. "
+            "Use when user says: 'hazil ayt', 'anekdot ayt', 'qiziq fakt', 'motivatsiya', "
+            "'tanga tashlash', 'kub otish', 'tasodifiy son', 'joke', 'tell me a joke', 'fun fact', 'quote'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "joke|fact|quote|bored|coin|dice|random|all (default: joke)"},
+                "sides":  {"type": "INTEGER", "description": "Dice sides (default 6)"},
+                "count":  {"type": "INTEGER", "description": "Number of dice (default 1)"},
+                "min":    {"type": "INTEGER", "description": "Random number min (default 1)"},
+                "max":    {"type": "INTEGER", "description": "Random number max (default 100)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "dictionary",
+        "description": (
+            "Looks up English word definitions, pronunciation, synonyms, and examples using Free Dictionary API. "
+            "Use when user asks: 'bu so'zning ma'nosi nima', 'define X', 'what does X mean', "
+            "'X so'zini izohla', 'X ning sinonimlari', 'X talaffuzi qanday'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "word":   {"type": "STRING", "description": "Word to look up (required)"},
+                "detail": {"type": "BOOLEAN", "description": "True for extended output with examples and synonyms"},
+            },
+            "required": ["word"]
+        }
+    },
+    {
+        "name": "timezone",
+        "description": (
+            "Shows current time in any city or timezone. "
+            "Use when user asks: 'Tokioda soat necha', 'Londonda vaqt qanday', 'New Yorkda hozir necha', "
+            "'what time is it in Paris', 'Dubai time', 'Moskva vaqti'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "city": {"type": "STRING", "description": "City or timezone name (e.g. Tokyo, London, Dubai, New York)"},
+            },
+            "required": ["city"]
+        }
+    },
+    {
+        "name": "crypto",
+        "description": (
+            "Gets real-time cryptocurrency prices and market data using CoinGecko (free, no key). "
+            "Use when user asks: 'Bitcoin narxi', 'ETH qancha', 'kripto narxlari', "
+            "'BTC price', 'top kriptolar', 'Ethereum qancha dollar'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "price|top|search (default: price)"},
+                "coin":   {"type": "STRING",
+                           "description": "Coin name or symbol: BTC, ETH, SOL, BNB, etc."},
+                "currency": {"type": "STRING",
+                             "description": "Currency code: usd (default), uzs, eur, rub"},
+                "limit":  {"type": "INTEGER",
+                           "description": "Number of top coins to show (for action=top, default 10)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "stocks",
+        "description": (
+            "Gets real-time stock prices using Yahoo Finance (free, no key). "
+            "Use when user asks: 'Apple aksiyasi', 'Tesla narxi', 'AAPL qancha', "
+            "'stock price', 'S&P 500', 'NASDAQ', 'oltin narxi', 'neft narxi'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "price|top (default: price)"},
+                "symbol": {"type": "STRING",
+                           "description": "Stock ticker: AAPL, TSLA, MSFT, GOOGL, AMZN, META, NVDA, etc."},
+                "symbols": {"type": "STRING",
+                            "description": "Comma-separated list of tickers for batch lookup"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "health_calc",
+        "description": (
+            "Calculates health metrics: BMI (body mass index), BMR (basal metabolic rate), "
+            "TDEE (daily calorie needs), water intake. "
+            "Use when user asks: 'mening BMIm qancha', 'kunlik kaloriya', 'suv me'yori', "
+            "'BMI hisoblash', 'ideal vazn', 'kaloriya hisobi'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":   {"type": "STRING",
+                             "description": "bmi|bmr|calories|water|all (default: bmi)"},
+                "weight":   {"type": "NUMBER", "description": "Weight in kilograms"},
+                "height":   {"type": "NUMBER", "description": "Height in centimeters"},
+                "age":      {"type": "INTEGER", "description": "Age in years"},
+                "gender":   {"type": "STRING", "description": "male or female"},
+                "activity": {"type": "STRING",
+                             "description": "sedentary|light|moderate|active|very_active"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "unit_converter",
+        "description": (
+            "Converts units: length, weight/mass, temperature, speed, volume, area, data storage, number bases. "
+            "Use when user asks: 'km ni milga', '100 funt necha kg', '37 Celsius Fahrenheit', "
+            "'convert 5 miles to km', 'GB ni MB ga', 'binary decimal', 'hex to decimal'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "value":    {"type": "NUMBER", "description": "Value to convert"},
+                "from_unit": {"type": "STRING", "description": "Source unit (e.g. km, kg, celsius, mph, GB)"},
+                "to_unit":   {"type": "STRING", "description": "Target unit (e.g. miles, lbs, fahrenheit, kph, MB)"},
+                "category": {"type": "STRING",
+                             "description": "Category: length|mass|temperature|speed|volume|area|data|number (auto-detected if omitted)"},
+            },
+            "required": ["value", "from_unit", "to_unit"]
+        }
+    },
+    {
+        "name": "url_tools",
+        "description": (
+            "URL utilities: shortens URLs, expands short URLs, checks if a URL is up. "
+            "Use when user says: 'bu linkni qisqartir', 'URL shorten', 'bu linkni tekshir', "
+            "'is this URL working', 'expand this short link', 'shorten this URL'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "shorten|expand|check (default: shorten)"},
+                "url":    {"type": "STRING", "description": "URL to process"},
+            },
+            "required": ["url"]
+        }
+    },
+    {
+        "name": "lyrics",
+        "description": (
+            "Finds and shows song lyrics using lrclib.net (free, no key). "
+            "Use when user asks: 'bu qo\'shiqning so\'zlari', 'lyrics of X', 'X qo\'shig\'i matni', "
+            "'X by Y song lyrics', 'qo\'shiq so\'zlari'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title":  {"type": "STRING", "description": "Song title (required)"},
+                "artist": {"type": "STRING", "description": "Artist/singer name (optional but helps accuracy)"},
+                "mode":   {"type": "STRING", "description": "plain (default) or synced (with timestamps)"},
+            },
+            "required": ["title"]
+        }
+    },
+    {
+        "name": "movie",
+        "description": (
+            "Gets movie or TV show info: plot, director, cast, IMDb rating, year, genre. "
+            "Uses OMDb (Open Movie Database). "
+            "Use when user asks: 'Inception haqida', 'bu film qachon chiqgan', 'film reytingi', "
+            "'movie info', 'tell me about X movie', 'who directed X', 'X filmning rejissyori kim'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title":  {"type": "STRING", "description": "Movie or TV show title (required)"},
+                "year":   {"type": "INTEGER", "description": "Release year (optional, helps find correct version)"},
+                "type":   {"type": "STRING", "description": "movie|series|episode (optional)"},
+                "action": {"type": "STRING", "description": "search (default, gets details) | list (returns multiple matches)"},
+            },
+            "required": ["title"]
+        }
+    },
+    {
+        "name": "email_send",
+        "description": (
+            "Sends an email via Gmail SMTP. "
+            "Use when user says: 'email yuborish', 'xat yubor', 'pochta yuborish', "
+            "'send email to X', 'email X ga yubor', 'mail jo'nat'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "to":      {"type": "STRING", "description": "Recipient email address"},
+                "subject": {"type": "STRING", "description": "Email subject/mavzu"},
+                "body":    {"type": "STRING", "description": "Email body text/matn"},
+            },
+            "required": ["to", "body"]
+        }
+    },
+    {
+        "name": "timer",
+        "description": (
+            "Sets a countdown timer that notifies when time is up. "
+            "Unlike alarm (clock-based), timer counts DOWN from now. "
+            "Use when user says: 'taymer o'rnat', '5 daqiqa taymer', 'set a timer for X minutes', "
+            "'timer for 30 seconds', '10 daqiqadan keyin eslatib qo'y', "
+            "'countdown', 'taymerni bekor qil'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":   {"type": "STRING",
+                             "description": "set (default)|list|cancel"},
+                "duration": {"type": "NUMBER",
+                             "description": "Timer duration (number)"},
+                "unit":     {"type": "STRING",
+                             "description": "Time unit: minutes (default)|seconds|hours"},
+                "minutes":  {"type": "NUMBER", "description": "Duration in minutes (shortcut)"},
+                "seconds":  {"type": "NUMBER", "description": "Duration in seconds (shortcut)"},
+                "hours":    {"type": "NUMBER", "description": "Duration in hours (shortcut)"},
+                "label":    {"type": "STRING", "description": "Timer label/name"},
+                "id":       {"type": "INTEGER", "description": "Timer ID for cancel"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "briefing",
+        "description": (
+            "Daily morning briefing: aggregates weather, top news, todos, and reminders into one summary. "
+            "Use when user says: 'bugungi brifing', 'kunlik xulosa', 'morning briefing', "
+            "'bugun nima bor', 'daily summary', 'xayrli tong', 'bugungi rejam'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "city": {"type": "STRING", "description": "City for weather (default: from config)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "contacts",
+        "description": (
+            "Personal phone book: add, search, list, update, delete contacts. "
+            "Stored locally in SQLite. "
+            "Use when user says: 'kontakt qo'sh', 'telefon raqamini saqla', "
+            "'Alining raqami', 'kontaktlar ro'yxati', 'add contact', 'find contact X', "
+            "'X ning nomeri nima'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "add|list|search|get|update|delete (default: list)"},
+                "name":   {"type": "STRING", "description": "Contact name"},
+                "phone":  {"type": "STRING", "description": "Phone number"},
+                "email":  {"type": "STRING", "description": "Email address"},
+                "notes":  {"type": "STRING", "description": "Notes/eslatma"},
+                "id":     {"type": "INTEGER", "description": "Contact ID for get/update/delete"},
+                "query":  {"type": "STRING", "description": "Search query for search action"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "smart_memory",
+        "description": (
+            "SEMANTIC long-term memory (RAG) — remembers free-form facts and recalls "
+            "them by MEANING, not keywords. This is separate from save_memory: use it for "
+            "richer, free-text knowledge that should be searchable later.\n"
+            "• action='remember' (text=...) — store a fact the user shares about themselves, "
+            "their life, preferences, people, plans, or anything worth recalling later. "
+            "Triggers: 'eslab qol', 'esingda bo'lsin', 'remember that...', 'manga aytib qo'y'.\n"
+            "• action='recall' (query=...) — BEFORE answering a question that may depend on "
+            "something the user told you earlier (their car, family, plans, preferences, past "
+            "facts), call recall to fetch relevant memories. Triggers: 'men aytgan edim', "
+            "'esingdami', 'mening ... nima edi', 'what did I tell you about...'.\n"
+            "• action='forget' (target=id/text/'all'), action='list'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "remember | recall | forget | list (default: recall)"},
+                "text":   {"type": "STRING",
+                           "description": "Fact to remember (for action=remember)"},
+                "query":  {"type": "STRING",
+                           "description": "What to search for by meaning (for action=recall)"},
+                "target": {"type": "STRING",
+                           "description": "id, matching text, or 'all' (for action=forget)"},
+                "k":      {"type": "INTEGER", "description": "Max results for recall (default 4)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "screen_vision",
+        "description": (
+            "JARVIS EKRANNI KO'RADI — kompyuter ekranini suratga olib, u haqida savol-javob qiladi. "
+            "Use when user asks about what's ON THEIR SCREEN: 'ekranimda nima bor', 'bu xatoni o'qi', "
+            "'ekrandagini xulosa qil', 'shu sahifada nima yozilgan', 'what's on my screen', "
+            "'read this error', 'what does this say'. Reads text, errors, dialogs, articles, anything visible."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":   {"type": "STRING",
+                             "description": "describe | read | summarize | error | important (default: describe)"},
+                "question": {"type": "STRING",
+                             "description": "Free-form question about the screen (overrides action)"},
+                "monitor":  {"type": "INTEGER", "description": "0=all monitors, 1=primary (default 0)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "screen_click",
+        "description": (
+            "VISION-GUIDED CLICK — clicks any on-screen element by describing it (computer use). "
+            "JARVIS ekranni ko'rib, tasvirlangan elementni topadi va bosadi. "
+            "Use when user says: 'X tugmasini bos', 'Login tugmasini bos', 'qizil X ni bos', "
+            "'click the search box', 'press the OK button'. Works on ANY app, not just browsers."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "target": {"type": "STRING",
+                           "description": "What to click, described in words (e.g. 'the blue Login button')"},
+                "button": {"type": "STRING",
+                           "description": "left | right | middle | double (default: left)"},
+                "monitor":{"type": "INTEGER", "description": "Monitor index (default 1 = primary)"},
+            },
+            "required": ["target"]
+        }
+    },
+    {
+        "name": "doc_chat",
+        "description": (
+            "CHAT WITH DOCUMENTS — indexes local files (txt, md, pdf, docx, code) and answers "
+            "questions grounded in their content (RAG). "
+            "Use when user says: 'shu faylni o'qi va savol beraman', 'hujjatlarimdan top', "
+            "'rezyumemda nima yozilgan', 'bu papkadagi fayllarni xulosa qil', "
+            "'chat with this PDF', 'index my Documents folder'. "
+            "First action='index' (path=fayl/papka), then action='ask' (query=savol)."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "index | ask | list | clear (default: ask)"},
+                "path":   {"type": "STRING",
+                           "description": "File or folder path to index (for action=index)"},
+                "query":  {"type": "STRING",
+                           "description": "Question about the indexed documents (for action=ask)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "auto_agent",
+        "description": (
+            "AUTONOMOUS IN-APP TASK AGENT — give it a GOAL and it does the WHOLE task inside ANY "
+            "application by itself: opens/focuses the app, then looks at the screen, clicks, types, "
+            "searches, scrolls, repeats until done. THIS is the tool for doing things INSIDE apps. "
+            "Use whenever the user wants an action performed within an app, e.g.: "
+            "'Telegramda Ali ni topib salom yoz', 'YouTube dan lofi qidirib qo'y', "
+            "'WhatsApp dan onamga xabar yoz', 'Chrome da GitHub ochib repo qidir', "
+            "'sozlamalarni och va wifi ni yoq', 'falon chatni topib shu textni yoz'. "
+            "Works in Telegram, WhatsApp, YouTube, browsers, editors, settings — EVERY app. "
+            "It can find a specific chat/contact/video and type the text the user dictated. "
+            "By default it WRITES/PREPARES the text but does NOT send/post unless the goal clearly "
+            "says to send/post/yubor. For a SINGLE click use screen_click; for one app launch use open_app."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "goal":      {"type": "STRING",
+                              "description": "The full in-app task in the user's words (include the app, the target like a contact/chat/video, and the exact text to type if any)"},
+                "app":       {"type": "STRING",
+                              "description": "App to open/focus first (e.g. telegram, youtube, chrome). Optional — auto-detected from goal if omitted."},
+                "max_steps": {"type": "INTEGER", "description": "Max actions (default 10, cap 15)"},
+            },
+            "required": ["goal"]
+        }
+    },
+    {
+        "name": "watcher",
+        "description": (
+            "PROACTIVE MONITOR — watches a condition in the background and ALERTS you (voice + "
+            "notification) when it happens, then stops. Use when user says: "
+            "'yuklab olish/render tugasa ayt', 'CPU 90% dan oshsa xabar ber', "
+            "'bu fayl paydo bo'lsa bildiri', 'batareya 20% ga tushsa ogohlantir', "
+            "'bu sahifa yangilansa ayt', 'tell me when X finishes/starts'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":    {"type": "STRING", "description": "add (default) | list | cancel"},
+                "condition": {"type": "STRING",
+                              "description": "process_done | process_start | file_exists | cpu_above | cpu_below | battery_below | battery_full | url_changed"},
+                "value":     {"type": "STRING",
+                              "description": "Process name / file path / percent / URL depending on condition"},
+                "note":      {"type": "STRING", "description": "Optional reminder text to say on alert"},
+                "id":        {"type": "STRING", "description": "Watcher id to cancel (or 'all')"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "time_machine",
+        "description": (
+            "PERFECT RECALL / TIME MACHINE — JARVIS records your screen activity in the "
+            "background (locally) and lets you search your past by MEANING. The killer feature: "
+            "ask what you were doing or find something you saw earlier.\n"
+            "Use when user says: 'vaqt mashinasini yoq' (start), 'kecha soat 3da nima qilayotgan edim', "
+            "'o'sha ... ni qachon ko'rgandim', 'find when I saw X', 'what was I doing', "
+            "'vaqt mashinasini to'xtat' (stop). action='start' first to begin recording."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "start | stop | status | search | timeline | clear (default: search)"},
+                "query":  {"type": "STRING", "description": "What to recall, by meaning (action=search)"},
+                "when":   {"type": "STRING", "description": "Time/day to look at, e.g. 'kecha 15:00', 'today 9' (action=timeline)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "research",
+        "description": (
+            "DEEP RESEARCH AGENT — for COMPLEX questions, JARVIS autonomously searches multiple "
+            "web sources, reads them, and writes ONE thorough Uzbek answer with [n] citations + a "
+            "sources list (Perplexity-style). Use for questions needing real research/comparison/"
+            "current info, NOT simple facts. Triggers: 'chuqur izlan', 'tadqiq qil', 'X haqida "
+            "batafsil ma'lumot top', 'X va Y ni solishtir', 'research X', 'investigate X', "
+            "'X haqida manbalar bilan ayt'. For a quick single fact use web_search instead."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "The research question/topic"},
+                "depth": {"type": "STRING",
+                          "description": "quick (3 sources) | normal (5) | deep (8). Default: normal"},
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "window_manager",
+        "description": (
+            "Manage desktop windows: list, focus, close, minimize, maximize, tile left/right. "
+            "Use when user says: 'ochiq oynalarni ko'rsat', 'Chrome'ni oldinga chiqar', "
+            "'oynani chap yarmiga qo'y', 'bu oynani kichiklashtir', 'focus Firefox', "
+            "'tile this window left', 'maximize the window'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "list | focus | close | minimize | maximize | left | right (default: list)"},
+                "target": {"type": "STRING",
+                           "description": "Window/app name to act on (omit = active window)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "math_solver",
+        "description": (
+            "Symbolic math: solve equations, simplify/expand/factor expressions, "
+            "compute derivatives and integrals using sympy. "
+            "Use when user says: 'tenglamani yech', 'solve x^2-4=0', "
+            "'hosilasini top', 'integral hisob', 'ifodani soddalash', "
+            "'x^3 + 2x simplify', 'factor x^2-1'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "expression": {"type": "STRING",
+                               "description": "Math expression or equation (e.g. 'x^2 - 4 = 0')"},
+                "action":     {"type": "STRING",
+                               "description": "solve|simplify|expand|factor|diff|integrate|eval (default: solve)"},
+                "variable":   {"type": "STRING",
+                               "description": "Variable to solve for (default: x)"},
+                "from":       {"type": "NUMBER", "description": "Lower bound for definite integral"},
+                "to":         {"type": "NUMBER", "description": "Upper bound for definite integral"},
+                "order":      {"type": "INTEGER", "description": "Derivative order (default: 1)"},
+            },
+            "required": ["expression"]
+        }
+    },
+    {
+        "name": "reddit",
+        "description": (
+            "Browse Reddit posts from any subreddit or search Reddit (no API key needed). "
+            "Use when user says: 'reddit', 'r/programming toppostlari', 'Reddit dan yangiliklar', "
+            "'Reddit worldnews', 'subreddit ko'rsat', 'Reddit izla X'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "subreddit": {"type": "STRING",
+                              "description": "Subreddit name: worldnews|technology|programming|science|games etc."},
+                "action":    {"type": "STRING",
+                              "description": "browse (default)|search|popular"},
+                "sort":      {"type": "STRING",
+                              "description": "hot (default)|new|top|rising"},
+                "limit":     {"type": "INTEGER",
+                              "description": "Number of posts (default 5, max 15)"},
+                "query":     {"type": "STRING",
+                              "description": "Search query (for action=search)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "emotion",
+        "description": (
+            "Detects the user's facial emotion from webcam in real-time using AI (DeepFace). "
+            "Recognizes: happy, sad, angry, surprise, fear, disgust, neutral. "
+            "Use when user says: 'hissiyotimni aniqla', 'kayfiyatimni ko\'r', "
+            "'emotion detect', 'yuzimni tahlil qil', 'men qanday ko\'rinaman', "
+            "'how do I look', 'what emotion am I showing'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "detect (default, fresh capture)|last (reuse last result)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "gesture_control",
+        "description": (
+            "Activates hand gesture control via webcam using MediaPipe. "
+            "Gestures: fist=mute, open palm=stop, pinch+move=volume, V-sign=screenshot. "
+            "Use when user says: 'gest boshqaruv', 'qo\'l bilan boshqar', "
+            "'gesture control on', 'hand gesture volume', 'gestlarni yoq', "
+            "'tovushni qo\'l bilan boshqar'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":      {"type": "STRING",
+                                "description": "start (default)|stop|status"},
+                "duration":    {"type": "NUMBER",
+                                "description": "How many seconds to listen for gestures (default 30)"},
+                "sensitivity": {"type": "NUMBER",
+                                "description": "Volume change sensitivity 0.5-2.0 (default 1.0)"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "webcam_vision",
+        "description": (
+            "Captures webcam frame and describes/analyzes it using Gemini Vision AI. "
+            "Can describe the scene, count objects, read text in frame, detect emotions. "
+            "Use when user says: 'kamerada nima ko\'rinayapti', 'meni tasvir qil', "
+            "'webcam tasvirini o\'qi', 'kamerani tahlil qil', "
+            "'what do you see', 'describe what you see', 'how many people', "
+            "'surat ol', 'kameradan o\'qi'."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING",
+                           "description": "describe|people|read|count|emotion|save (default: describe)"},
+                "prompt": {"type": "STRING",
+                           "description": "Custom question/prompt about the webcam image"},
+                "object": {"type": "STRING",
+                           "description": "Object to count (for action=count)"},
+            },
+            "required": []
+        }
+    },
 ]
 
 class JarvisLive:
@@ -1792,6 +2553,9 @@ class JarvisLive:
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
             return
+        if face_verifier.is_access_blocked():
+            self.ui.write_log("[Security] Begona yuz aniqlandi — matn bloklanди.")
+            return
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
                 turns={"parts": [{"text": text}]},
@@ -1807,16 +2571,19 @@ class JarvisLive:
             self.ui.set_state("SPEAKING")
         elif not self.ui.muted:
             self.ui.set_state("LISTENING")
-            # Schedule auto-mute after Jarvis finishes speaking (wake-word mode)
-            if self._wake_detector and not self._is_speaking:
+            # Schedule auto-mute after Jarvis finishes speaking (wake-word mode only)
+            # Skip when face watcher is running — it manages muting via face detection
+            if self._wake_detector and not self._is_speaking and not face_verifier.is_enabled():
                 if hasattr(self, "_sleep_timer") and self._sleep_timer:
                     self._sleep_timer.cancel()
-                self._sleep_timer = threading.Timer(8.0, self._auto_sleep)
+                self._sleep_timer = threading.Timer(25.0, self._auto_sleep)
                 self._sleep_timer.daemon = True
                 self._sleep_timer.start()
 
     def _auto_sleep(self):
         """Re-mute after grace period so user must say 'hey jarvis' again."""
+        if face_verifier.is_enabled():
+            return  # face watcher handles muting
         if not self.ui.muted and not self._is_speaking:
             self.ui.muted = True
             print("[JARVIS] 💤 Auto-sleep — say 'hey jarvis' to wake")
@@ -1856,6 +2623,9 @@ class JarvisLive:
         parts = [time_ctx]
         if mem_str:
             parts.append(mem_str)
+        vocab = stt_context.system_vocab_block()
+        if vocab:
+            parts.append(vocab)
         parts.append(sys_prompt)
 
         return types.LiveConnectConfig(
@@ -1871,7 +2641,6 @@ class JarvisLive:
                         voice_name="Charon"
                     )
                 ),
-                language_code="uz-UZ",
             ),
         )
 
@@ -2228,6 +2997,148 @@ class JarvisLive:
                     None, lambda: samsung_tv_action(parameters=args, player=self.ui))
                 result = r or "Done."
 
+            elif name == "type_text":
+                r = await loop.run_in_executor(
+                    None, lambda: type_text_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "wikipedia":
+                r = await loop.run_in_executor(
+                    None, lambda: wikipedia_action(parameters=args, player=self.ui))
+                result = r or "Natija topilmadi."
+
+            elif name == "news":
+                r = await loop.run_in_executor(
+                    None, lambda: news_action(parameters=args, player=self.ui))
+                result = r or "Yangiliklar topilmadi."
+
+            elif name == "dictation":
+                r = await loop.run_in_executor(
+                    None, lambda: dictation_action(parameters=args, player=self.ui))
+                result = r or "Diktovka tugadi."
+
+            elif name == "joke":
+                r = await loop.run_in_executor(
+                    None, lambda: joke_action(parameters=args, player=self.ui))
+                result = r or "Hazil topilmadi."
+
+            elif name == "dictionary":
+                r = await loop.run_in_executor(
+                    None, lambda: dictionary_action(parameters=args, player=self.ui))
+                result = r or "So'z topilmadi."
+
+            elif name == "timezone":
+                r = await loop.run_in_executor(
+                    None, lambda: timezone_action(parameters=args, player=self.ui))
+                result = r or "Vaqt maʼlumoti topilmadi."
+
+            elif name == "crypto":
+                r = await loop.run_in_executor(
+                    None, lambda: crypto_action(parameters=args, player=self.ui))
+                result = r or "Kripto maʼlumoti topilmadi."
+
+            elif name == "stocks":
+                r = await loop.run_in_executor(
+                    None, lambda: stocks_action(parameters=args, player=self.ui))
+                result = r or "Aksiya maʼlumoti topilmadi."
+
+            elif name == "health_calc":
+                r = await loop.run_in_executor(
+                    None, lambda: health_calc_action(parameters=args, player=self.ui))
+                result = r or "Hisob-kitob amalga oshmadi."
+
+            elif name == "unit_converter":
+                r = await loop.run_in_executor(
+                    None, lambda: unit_converter_action(parameters=args, player=self.ui))
+                result = r or "Konvertatsiya amalga oshmadi."
+
+            elif name == "url_tools":
+                r = await loop.run_in_executor(
+                    None, lambda: url_tools_action(parameters=args, player=self.ui))
+                result = r or "URL amaliyoti bajarilmadi."
+
+            elif name == "lyrics":
+                r = await loop.run_in_executor(
+                    None, lambda: lyrics_action(parameters=args, player=self.ui))
+                result = r or "So'z matni topilmadi."
+
+            elif name == "movie":
+                r = await loop.run_in_executor(
+                    None, lambda: movie_action(parameters=args, player=self.ui))
+                result = r or "Film maʼlumoti topilmadi."
+
+            elif name == "email_send":
+                r = await loop.run_in_executor(None, lambda: email_action(parameters=args, player=self.ui))
+                result = r or "Email yuborildi."
+
+            elif name == "timer":
+                r = await loop.run_in_executor(None, lambda: timer_action(parameters=args, player=self.ui))
+                result = r or "Taymer o'rnatildi."
+
+            elif name == "briefing":
+                r = await loop.run_in_executor(None, lambda: briefing_action(parameters=args, player=self.ui))
+                result = r or "Brifing tayyor."
+
+            elif name == "contacts":
+                r = await loop.run_in_executor(None, lambda: contacts_action(parameters=args, player=self.ui))
+                result = r or "Done."
+
+            elif name == "math_solver":
+                r = await loop.run_in_executor(None, lambda: math_solver_action(parameters=args, player=self.ui))
+                result = r or "Yechim topilmadi."
+
+            elif name == "reddit":
+                r = await loop.run_in_executor(None, lambda: reddit_action(parameters=args, player=self.ui))
+                result = r or "Reddit postlari topilmadi."
+
+            elif name == "emotion":
+                r = await loop.run_in_executor(None, lambda: emotion_action(parameters=args, player=self.ui))
+                result = r or "Hissiyot aniqlanmadi."
+
+            elif name == "gesture_control":
+                r = await loop.run_in_executor(None, lambda: gesture_action(parameters=args, player=self.ui))
+                result = r or "Imo-ishora boshqaruvi bajarildi."
+
+            elif name == "webcam_vision":
+                r = await loop.run_in_executor(None, lambda: webcam_vision_action(parameters=args, player=self.ui))
+                result = r or "Tasvir tahlil qilinmadi."
+
+            elif name == "smart_memory":
+                r = await loop.run_in_executor(None, lambda: smart_memory_action(parameters=args, player=self.ui))
+                result = r or "Xotira amali bajarildi."
+
+            elif name == "screen_vision":
+                r = await loop.run_in_executor(None, lambda: screen_vision_action(parameters=args, player=self.ui))
+                result = r or "Ekran tahlil qilinmadi."
+
+            elif name == "screen_click":
+                r = await loop.run_in_executor(None, lambda: screen_click_action(parameters=args, player=self.ui))
+                result = r or "Bosilmadi."
+
+            elif name == "doc_chat":
+                r = await loop.run_in_executor(None, lambda: doc_chat_action(parameters=args, player=self.ui))
+                result = r or "Hujjat amali bajarilmadi."
+
+            elif name == "window_manager":
+                r = await loop.run_in_executor(None, lambda: window_manager_action(parameters=args, player=self.ui))
+                result = r or "Oyna amali bajarilmadi."
+
+            elif name == "auto_agent":
+                r = await loop.run_in_executor(None, lambda: auto_agent_action(parameters=args, player=self.ui))
+                result = r or "Vazifa bajarilmadi."
+
+            elif name == "watcher":
+                r = await loop.run_in_executor(None, lambda: watcher_action(parameters=args, player=self.ui, speak=self.speak))
+                result = r or "Kuzatuvchi amali bajarilmadi."
+
+            elif name == "research":
+                r = await loop.run_in_executor(None, lambda: research_action(parameters=args, player=self.ui))
+                result = r or "Tadqiqot natijasi topilmadi."
+
+            elif name == "time_machine":
+                r = await loop.run_in_executor(None, lambda: time_machine_action(parameters=args, player=self.ui))
+                result = r or "Vaqt mashinasi amali bajarilmadi."
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("All systems standing by. Shutting down gracefully. Goodbye, sir.")
@@ -2270,6 +3181,26 @@ class JarvisLive:
             response={"result": result}
         )
 
+    def _enqueue_audio(self, msg):
+        """Put an audio chunk on out_queue, dropping the oldest frame when full.
+
+        Runs in the event-loop thread (via call_soon_threadsafe). Prevents the
+        QueueFull spam that occurs when the mic produces audio faster than
+        _send_realtime can drain it — we keep the freshest audio instead.
+        """
+        q = self.out_queue
+        try:
+            q.put_nowait(msg)
+        except asyncio.QueueFull:
+            try:
+                q.get_nowait()      # drop oldest, make room
+            except Exception:
+                pass
+            try:
+                q.put_nowait(msg)
+            except Exception:
+                pass
+
     async def _send_realtime(self):
         while True:
             msg = await self.out_queue.get()
@@ -2283,10 +3214,11 @@ class JarvisLive:
         _sv_pre_buf:   list  = []   # raw PCM chunks collected before verify
         _sv_verified:  bool  = False
         _sv_rejected:  bool  = False
-        _SV_PRE_FRAMES = 22  # ~22 * 64ms ≈ 1.4s before running verify
+        _prev_blocked: bool  = False  # tracks previous is_access_blocked() state
+        _SV_PRE_FRAMES = 10  # ~10 * 64ms ≈ 0.64s before running verify
 
         def callback(indata, frames, time_info, status):
-            nonlocal _sv_pre_buf, _sv_verified, _sv_rejected
+            nonlocal _sv_pre_buf, _sv_verified, _sv_rejected, _prev_blocked
             with self._speaking_lock:
                 jarvis_speaking = self._is_speaking
 
@@ -2302,6 +3234,30 @@ class JarvisLive:
                     print(f"[WakeWord] feed error: {e}")
 
             if not jarvis_speaking and not self.ui.muted:
+                _cur_blocked = face_verifier.is_access_blocked()
+
+                # Transition: face just reappeared (blocked→unblocked) — full reset.
+                # Needed because ui.muted=True can prevent the face gate from running,
+                # leaving _sv_rejected stale when the owner reappears.
+                if _prev_blocked and not _cur_blocked:
+                    self._gate_attack_count = 0
+                    self._gate_open         = False
+                    self._gate_hold_count   = 0
+                    _sv_pre_buf  = []
+                    _sv_verified = False
+                    _sv_rejected = False
+                _prev_blocked = _cur_blocked
+
+                # Face gate: if owner enrolled but not visible — block audio
+                if _cur_blocked:
+                    self._gate_attack_count = 0
+                    self._gate_open         = False
+                    self._gate_hold_count   = 0
+                    _sv_pre_buf  = []
+                    _sv_verified = False
+                    _sv_rejected = False
+                    return
+
                 # Noise gate: reject background noise and brief transients
                 arr = np.frombuffer(indata, dtype=np.int16)
                 rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
@@ -2314,11 +3270,18 @@ class JarvisLive:
 
                 # Lip-assisted gate: lower threshold when owner's lips are moving
                 lips_active  = face_verifier.is_speaking() and face_verifier.is_owner_seen()
-                _live_rms_th = _GATE_OPEN_RMS // 2 if lips_active else _GATE_OPEN_RMS
+                _live_rms_th = int(_GATE_OPEN_RMS * 0.75) if lips_active else _GATE_OPEN_RMS
 
                 if rms >= _live_rms_th:
                     self._gate_attack_count += 1
                     if self._gate_attack_count >= _GATE_ATTACK:
+                        # User is speaking — cancel auto-sleep timer
+                        if hasattr(self, '_sleep_timer') and self._sleep_timer:
+                            try:
+                                self._sleep_timer.cancel()
+                                self._sleep_timer = None
+                            except Exception:
+                                pass
                         # Gate wants to open — check speaker first
                         if not _sv_verified and not _sv_rejected:
                             _sv_pre_buf.append(indata.tobytes())
@@ -2330,7 +3293,7 @@ class JarvisLive:
                                     # Flush pre-buffer to Gemini
                                     for chunk in _sv_pre_buf:
                                         loop.call_soon_threadsafe(
-                                            self.out_queue.put_nowait,
+                                            self._enqueue_audio,
                                             {"data": chunk, "mime_type": "audio/pcm"},
                                         )
                                     _sv_pre_buf = []
@@ -2354,7 +3317,7 @@ class JarvisLive:
 
                 if self._gate_open and _sv_verified:
                     loop.call_soon_threadsafe(
-                        self.out_queue.put_nowait,
+                        self._enqueue_audio,
                         {"data": indata.tobytes(), "mime_type": "audio/pcm"}
                     )
 
@@ -2492,7 +3455,12 @@ class JarvisLive:
                     self.ui.write_log("SYS: JARVIS online.")
                     self.ui.push_notification("JARVIS systems online")
                     self.speak("JARVIS systems online. Ready.")
-                    face_verifier.start_face_watcher(self.ui)
+                    if face_verifier.is_active() and face_verifier.is_enabled():
+                        face_verifier.start_face_watcher(self.ui, cam_index=0)
+                        # Face watcher controls ui.muted — don't override here
+                    else:
+                        # Face ID OFF (or no profile) → camera stays off, mic always on
+                        self.ui.muted = False
 
                     tg.create_task(self._send_realtime())
                     tg.create_task(self._listen_audio())
@@ -2508,6 +3476,7 @@ class JarvisLive:
             await asyncio.sleep(3)
 
 OPENAI_TOOLS = _to_openai_tools(TOOL_DECLARATIONS)
+ANTHROPIC_TOOLS = _to_anthropic_tools(TOOL_DECLARATIONS)
 
 
 class JarvisOpenAI:
@@ -2521,6 +3490,10 @@ class JarvisOpenAI:
         self._is_speaking   = False
         self._speaking_lock = threading.Lock()
         self._processing    = False
+        # Backend-specific greetings (overridden by JarvisClaude)
+        self._ready_print  = "[JARVIS] ✅ GPT-4o pipeline ready."
+        self._online_log   = "SYS: JARVIS online (GPT-4o)."
+        self._online_speak = "J.A.R.V.I.S systems online. GPT-4 ready."
 
         self.ui.on_text_command = self._on_text_command
 
@@ -2559,14 +3532,16 @@ class JarvisOpenAI:
             self.ui.set_state("SPEAKING")
         elif not self.ui.muted:
             self.ui.set_state("LISTENING")
-            if self._wake_detector:
+            if self._wake_detector and not face_verifier.is_enabled():
                 if hasattr(self, "_sleep_timer") and self._sleep_timer:
                     self._sleep_timer.cancel()
-                self._sleep_timer = threading.Timer(8.0, self._auto_sleep)
+                self._sleep_timer = threading.Timer(25.0, self._auto_sleep)
                 self._sleep_timer.daemon = True
                 self._sleep_timer.start()
 
     def _auto_sleep(self):
+        if face_verifier.is_enabled():
+            return  # face watcher handles muting
         with self._speaking_lock:
             speaking = self._is_speaking
         if not self.ui.muted and not speaking:
@@ -2639,6 +3614,9 @@ class JarvisOpenAI:
         parts   = [f"[CURRENT DATE & TIME]\nRight now it is: {ts}\n"]
         if mem_str:
             parts.append(mem_str)
+        vocab = stt_context.system_vocab_block()
+        if vocab:
+            parts.append(vocab)
         parts.append(sys_p)
         return "\n".join(parts)
 
@@ -2808,6 +3786,70 @@ class JarvisOpenAI:
                 return face_auth_action(parameters=args, player=self.ui) or "Done."
             if name == "samsung_tv":
                 return samsung_tv_action(parameters=args, player=self.ui) or "Done."
+            if name == "type_text":
+                return type_text_action(parameters=args, player=self.ui) or "Done."
+            if name == "wikipedia":
+                return wikipedia_action(parameters=args, player=self.ui) or "Natija topilmadi."
+            if name == "news":
+                return news_action(parameters=args, player=self.ui) or "Yangiliklar topilmadi."
+            if name == "dictation":
+                return dictation_action(parameters=args, player=self.ui) or "Diktovka tugadi."
+            if name == "joke":
+                return joke_action(parameters=args, player=self.ui) or "Hazil topilmadi."
+            if name == "dictionary":
+                return dictionary_action(parameters=args, player=self.ui) or "So'z topilmadi."
+            if name == "timezone":
+                return timezone_action(parameters=args, player=self.ui) or "Vaqt ma'lumoti topilmadi."
+            if name == "crypto":
+                return crypto_action(parameters=args, player=self.ui) or "Kripto ma'lumoti topilmadi."
+            if name == "stocks":
+                return stocks_action(parameters=args, player=self.ui) or "Aksiya ma'lumoti topilmadi."
+            if name == "health_calc":
+                return health_calc_action(parameters=args, player=self.ui) or "Hisob-kitob amalga oshmadi."
+            if name == "unit_converter":
+                return unit_converter_action(parameters=args, player=self.ui) or "Konvertatsiya amalga oshmadi."
+            if name == "url_tools":
+                return url_tools_action(parameters=args, player=self.ui) or "URL amaliyoti bajarilmadi."
+            if name == "lyrics":
+                return lyrics_action(parameters=args, player=self.ui) or "So'z matni topilmadi."
+            if name == "movie":
+                return movie_action(parameters=args, player=self.ui) or "Film ma'lumoti topilmadi."
+            if name == "email_send":
+                return email_action(parameters=args, player=self.ui) or "Email yuborildi."
+            if name == "timer":
+                return timer_action(parameters=args, player=self.ui) or "Taymer o'rnatildi."
+            if name == "briefing":
+                return briefing_action(parameters=args, player=self.ui) or "Brifing tayyor."
+            if name == "contacts":
+                return contacts_action(parameters=args, player=self.ui) or "Done."
+            if name == "math_solver":
+                return math_solver_action(parameters=args, player=self.ui) or "Yechim topilmadi."
+            if name == "reddit":
+                return reddit_action(parameters=args, player=self.ui) or "Reddit postlari topilmadi."
+            if name == "emotion":
+                return emotion_action(parameters=args, player=self.ui) or "Hissiyot aniqlanmadi."
+            if name == "gesture_control":
+                return gesture_action(parameters=args, player=self.ui) or "Imo-ishora boshqaruvi bajarildi."
+            if name == "webcam_vision":
+                return webcam_vision_action(parameters=args, player=self.ui) or "Tasvir tahlil qilinmadi."
+            if name == "smart_memory":
+                return smart_memory_action(parameters=args, player=self.ui) or "Xotira amali bajarildi."
+            if name == "screen_vision":
+                return screen_vision_action(parameters=args, player=self.ui) or "Ekran tahlil qilinmadi."
+            if name == "screen_click":
+                return screen_click_action(parameters=args, player=self.ui) or "Bosilmadi."
+            if name == "doc_chat":
+                return doc_chat_action(parameters=args, player=self.ui) or "Hujjat amali bajarilmadi."
+            if name == "window_manager":
+                return window_manager_action(parameters=args, player=self.ui) or "Oyna amali bajarilmadi."
+            if name == "auto_agent":
+                return auto_agent_action(parameters=args, player=self.ui) or "Vazifa bajarilmadi."
+            if name == "watcher":
+                return watcher_action(parameters=args, player=self.ui, speak=self.speak) or "Kuzatuvchi amali bajarilmadi."
+            if name == "research":
+                return research_action(parameters=args, player=self.ui) or "Tadqiqot natijasi topilmadi."
+            if name == "time_machine":
+                return time_machine_action(parameters=args, player=self.ui) or "Vaqt mashinasi amali bajarilmadi."
             if name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 def _bye():
@@ -2828,6 +3870,9 @@ class JarvisOpenAI:
     # ── LLM pipeline ─────────────────────────────────────────────────
 
     def _on_text_command(self, text: str):
+        if face_verifier.is_access_blocked():
+            self.ui.write_log("[Security] Begona yuz aniqlandi — matn bloklandi.")
+            return
         threading.Thread(target=self._process, args=(text,), daemon=True).start()
 
     def _process(self, user_text: str):
@@ -2941,19 +3986,15 @@ class JarvisOpenAI:
                 model="whisper-1",
                 file=buf,
                 language="uz",
-                prompt=(
-                    "Jarvis, yoq, o'chir, ochiq, yopiq, boshlash, to'xtat, ko'rsat, "
-                    "qidirish, yukla, saqla, o'chir, holat, tekshir, qo'sh, o'zgartir, "
-                    "vazifa, signal, eslatma, ob-havo, tarjima, hisob, parol, "
-                    "CPU, RAM, disk, batareya, wifi, ekran, fayl, papka, "
-                    "dollar, so'm, rubl, evro, YouTube, GitHub, Google, "
-                    "Jarvis yoq, Jarvis o'chir, Jarvis salom, Jarvis qil"
-                ),
+                prompt=stt_context.whisper_prompt(),
             )
             text = tx.text.strip()
             print(f"[Whisper] → {text[:80]}")
             if text:
-                self._process(text)
+                corrected = stt_context.correct(text)
+                if corrected != text:
+                    print(f"[STTCorrect] → {corrected[:80]}")
+                self._process(corrected)
             else:
                 if not self.ui.muted:
                     self.ui.set_state("LISTENING")
@@ -2965,20 +4006,26 @@ class JarvisOpenAI:
     # ── Mic loop ──────────────────────────────────────────────────────
 
     def run(self):
-        print("[JARVIS] ✅ GPT-4o pipeline ready.")
+        print(self._ready_print)
         self.ui.set_state("LISTENING")
-        self.ui.write_log("SYS: JARVIS online (GPT-4o).")
+        self.ui.write_log(self._online_log)
         self.ui.push_notification("JARVIS systems online")
-        self.speak("J.A.R.V.I.S systems online. GPT-4 ready.")
-        face_verifier.start_face_watcher(self.ui)
+        self.speak(self._online_speak)
+        if face_verifier.is_active() and face_verifier.is_enabled():
+            face_verifier.start_face_watcher(self.ui, cam_index=0)
+            # Face watcher controls ui.muted — don't override here
+        else:
+            # Face ID OFF (or no profile) → camera stays off, mic always on
+            self.ui.muted = False
 
-        audio_buffer: list = []
-        gate_open         = False
-        attack_count      = 0
-        hold_count        = 0
+        audio_buffer:  list = []
+        gate_open          = False
+        attack_count       = 0
+        hold_count         = 0
+        prev_blocked: bool = False  # tracks previous is_access_blocked() state
 
         def callback(indata, frames, time_info, status):
-            nonlocal gate_open, attack_count, hold_count, audio_buffer
+            nonlocal gate_open, attack_count, hold_count, audio_buffer, prev_blocked
 
             with self._speaking_lock:
                 jarvis_speaking = self._is_speaking
@@ -2992,6 +4039,24 @@ class JarvisOpenAI:
             if jarvis_speaking or self.ui.muted or self._processing:
                 return
 
+            cur_blocked = face_verifier.is_access_blocked()
+
+            # Transition: face just reappeared — reset gate state for fresh start
+            if prev_blocked and not cur_blocked:
+                gate_open    = False
+                attack_count = 0
+                hold_count   = 0
+                audio_buffer = []
+            prev_blocked = cur_blocked
+
+            # Face gate: if owner enrolled but not visible — block audio
+            if cur_blocked:
+                gate_open    = False
+                attack_count = 0
+                hold_count   = 0
+                audio_buffer = []
+                return
+
             arr = np.frombuffer(indata, dtype=np.int16)
             rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
 
@@ -3002,7 +4067,7 @@ class JarvisOpenAI:
 
             # Lip-assisted gate: if face watcher detects owner speaking, lower threshold
             lips_active = face_verifier.is_speaking() and face_verifier.is_owner_seen()
-            effective_rms = _GATE_OPEN_RMS // 2 if lips_active else _GATE_OPEN_RMS
+            effective_rms = int(_GATE_OPEN_RMS * 0.75) if lips_active else _GATE_OPEN_RMS
 
             if rms >= effective_rms:
                 attack_count += 1
@@ -3040,6 +4105,110 @@ class JarvisOpenAI:
                 time.sleep(0.1)
 
 
+class JarvisClaude(JarvisOpenAI):
+    """Claude (Anthropic Opus 4.8) powered JARVIS.
+
+    Reuses the GPT-4o pipeline end-to-end — Whisper STT, edge-tts/OpenAI TTS,
+    wake-word, the 97-tool executor — and only swaps the brain to Anthropic's
+    Messages API with adaptive thinking + tool use (manual loop so tools run
+    through the existing _execute_tool dispatch).
+    """
+
+    def __init__(self, ui: "JarvisUI"):
+        super().__init__(ui)
+        import anthropic
+        self._claude = anthropic.Anthropic(api_key=_get_anthropic_key())
+        self._anthropic_tools = ANTHROPIC_TOOLS
+        # Command-execution quality lever: high = excellent tool selection +
+        # intent understanding (xhigh is even more thorough but slower).
+        try:
+            with open(API_CONFIG_PATH, "r", encoding="utf-8") as _cf:
+                self._claude_effort = (json.load(_cf).get("claude_effort") or "high").lower()
+        except Exception:
+            self._claude_effort = "high"
+        self._ready_print  = "[JARVIS] ✅ Claude (Opus 4.8) pipeline ready."
+        self._online_log   = "SYS: JARVIS online (Claude Opus 4.8)."
+        self._online_speak = "J.A.R.V.I.S systems online. Claude ready."
+
+    def _trim_history(self):
+        # Keep history bounded, but always start at a clean {user, str} turn so
+        # the API never sees an orphaned tool_result or a leading assistant msg.
+        if len(self._history) <= 30:
+            return
+        cut = len(self._history) - 28
+        while cut < len(self._history) and not (
+            self._history[cut].get("role") == "user"
+            and isinstance(self._history[cut].get("content"), str)
+        ):
+            cut += 1
+        if cut < len(self._history):
+            self._history = self._history[cut:]
+
+    def _process(self, user_text: str):
+        if self._processing:
+            return
+        self._processing = True
+        try:
+            self.ui.set_state("THINKING")
+            self.ui.write_log(f"You: {user_text}")
+            self._history.append({"role": "user", "content": user_text})
+            self._trim_history()
+
+            system = self._system_prompt()
+            final_text = ""
+
+            for _round in range(6):  # cap tool-use rounds per turn
+                with self._claude.messages.stream(
+                    model="claude-opus-4-8",
+                    max_tokens=16000,
+                    thinking={"type": "adaptive"},
+                    output_config={"effort": self._claude_effort},
+                    system=system,
+                    tools=self._anthropic_tools,
+                    messages=self._history,
+                ) as stream:
+                    resp = stream.get_final_message()
+
+                # Preserve the FULL content (incl. thinking blocks) — required to
+                # continue a tool-use turn on the next request.
+                self._history.append({"role": "assistant", "content": resp.content})
+
+                if resp.stop_reason == "tool_use":
+                    tool_results = []
+                    for block in resp.content:
+                        if block.type == "tool_use":
+                            self.ui.set_state("EXECUTING")
+                            print(f"[Claude] \U0001f527 {block.name} {dict(block.input)}")
+                            try:
+                                result = self._execute_tool(block.name, dict(block.input))
+                            except Exception as e:
+                                result = f"Tool '{block.name}' failed: {e}"
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": str(result)[:6000],
+                            })
+                    self._history.append({"role": "user", "content": tool_results})
+                    continue
+
+                final_text = "".join(
+                    b.text for b in resp.content if getattr(b, "type", "") == "text"
+                ).strip()
+                break
+
+            if final_text:
+                self.ui.write_log(f"JARVIS: {final_text}")
+                self.speak(final_text)
+        except Exception as e:
+            self.ui._win.hud.trigger_error()
+            self.ui.write_log(f"ERR: Claude — {e}")
+            traceback.print_exc()
+        finally:
+            self._processing = False
+            if not self.ui.muted:
+                self.ui.set_state("LISTENING")
+
+
 def _ensure_single_instance() -> bool:
     """Return True if we are the first instance. Focus existing window and return False otherwise."""
     if sys.platform != "win32":
@@ -3059,41 +4228,122 @@ def _ensure_single_instance() -> bool:
     return True
 
 
+def _setup_echo_cancel() -> str | None:
+    """Load PulseAudio/PipeWire echo cancel module and set as default source.
+
+    Fixes: YouTube/speaker audio leaking into microphone — AI hears both user
+    and speaker output simultaneously (acoustic echo).
+    Returns the original default source name so we can restore it on exit.
+    """
+    import subprocess as _sp
+    SOURCE = "jarvis_mic_clean"
+    try:
+        # Save original default so we can restore on exit
+        original = _sp.run(
+            ["pactl", "get-default-source"],
+            capture_output=True, text=True, timeout=3
+        ).stdout.strip()
+
+        # Load module if not already present
+        modules = _sp.run(
+            ["pactl", "list", "modules", "short"],
+            capture_output=True, text=True, timeout=5
+        ).stdout
+        if "module-echo-cancel" not in modules:
+            r = _sp.run([
+                "pactl", "load-module", "module-echo-cancel",
+                "aec_method=webrtc",
+                f"source_name={SOURCE}",
+                "sink_name=jarvis_sink_clean",
+                "source_master=@DEFAULT_SOURCE@",
+                "sink_master=@DEFAULT_SINK@",
+            ], capture_output=True, text=True, timeout=5)
+            if r.returncode != 0:
+                print(f"[Audio] Echo cancel load failed: {r.stderr.strip()}")
+                return None
+            print("[Audio] ✅ Echo cancellation (WebRTC AEC) yoqildi.")
+        else:
+            print("[Audio] ✅ Echo cancellation allaqachon faol.")
+
+        # Set as system default source → sd.InputStream(device=None) will use it
+        _sp.run(["pactl", "set-default-source", SOURCE],
+                capture_output=True, timeout=3)
+        print(f"[Audio] Default mic → {SOURCE}")
+        return original
+    except FileNotFoundError:
+        print("[Audio] pactl topilmadi — echo cancellation o'tkazib yuborildi.")
+    except Exception as e:
+        print(f"[Audio] Echo cancel setup xatosi: {e}")
+    return None
+
+
+def _restore_default_source(original: str | None) -> None:
+    """Restore the original default source on exit."""
+    if not original:
+        return
+    try:
+        import subprocess as _sp
+        _sp.run(["pactl", "set-default-source", original],
+                capture_output=True, timeout=3)
+        print(f"[Audio] Default mic qayta tiklandi → {original}")
+    except Exception:
+        pass
+
+
 def main():
     if not _ensure_single_instance():
         print("[JARVIS] Already running — focused existing window.")
         return
 
     speaker_verifier.load_profile()
+    speaker_verifier._load_active()   # restore persisted Voice ID (owner-only) toggle
+    time_machine.load_flag()
+    if time_machine._state.get("recording"):
+        time_machine.start_recording()   # resume Time Machine if it was ON
     face_verifier.load_profile()
+    face_verifier._load_active()   # restore persisted Face ID ON/OFF toggle
+    _original_mic = _setup_echo_cancel()  # AEC: cancels speaker echo in microphone
+    import atexit as _atexit
+    _atexit.register(_restore_default_source, _original_mic)
     ui = JarvisUI("face.png")
 
-    def _on_double_clap():
-        """Toggle JARVIS mute on double clap."""
-        ui.muted = not ui.muted
-        state = "MUTED" if ui.muted else "LISTENING"
-        try:
-            ui.set_state(state)
-        except Exception:
-            pass
-        ui.write_log(f"SYS: Double clap — JARVIS {'muted' if ui.muted else 'active'}.")
-        print(f"[ClapDetector] 👏👏 Double clap → {'MUTED' if ui.muted else 'ACTIVE'}")
-
-    def _start_clap():
+    def _auto_enroll_if_needed():
+        """If Face ID is ON but no profile exists, open enrollment on the main thread."""
         import time as _t
-        _t.sleep(3)
-        try:
-            detector = ClapDetector(_on_double_clap)
-            detector.start()
-        except Exception as e:
-            print(f"[ClapDetector] ⚠️ Failed to start: {e}")
+        _t.sleep(3)  # wait for UI to finish loading
+        if face_verifier.is_active() and not face_verifier.is_enabled():
+            ui.write_log("📷 Yuz profili topilmadi — ro'yxatdan o'tkazish oynasi ochilmoqda...")
+            _t.sleep(1)
+            ui.open_enroll_dialog(cam_index=0)  # signal → runs on main Qt thread
 
-    threading.Thread(target=_start_clap, daemon=True).start()
+    threading.Thread(target=_auto_enroll_if_needed, daemon=True).start()
+
+    # ── Double-clap-to-mute DISABLED ──────────────────────────────────────────
+    # Root cause of erratic muting: ClapDetector (RMS threshold 0.45 + "2 loud
+    # frames within 0.8s") false-triggered on normal speech / laughter / noise,
+    # toggling mute while the user was talking. Mute is now controlled only by
+    # F4, the on-screen mic button, and the "hey jarvis" wake word / toggle_mute.
+    # (Qayta yoqish uchun bu blokni va ClapDetector ishga tushirishni tiklang.)
 
     def runner():
         ui.wait_for_api_key()
-        # Use GPT-4o pipeline if openai_api_key is set AND has quota, else Gemini Live
-        if _get_openai_api_key() and _openai_quota_ok():
+        # Backend selection — config "backend" key: auto | claude | openai | gemini.
+        # In auto mode, prefer Claude if its key exists (user added it on purpose),
+        # else GPT-4o when OpenAI has quota, else Gemini Live.
+        pref          = _get_backend_pref()
+        anthropic_key = _get_anthropic_key()
+        use_claude = (pref == "claude") or (pref == "auto" and bool(anthropic_key))
+        use_openai = (pref == "openai") or (pref == "auto" and not anthropic_key
+                                            and _get_openai_api_key() and _openai_quota_ok())
+
+        if use_claude and anthropic_key:
+            print("[JARVIS] 🧠 Backend: Claude (Opus 4.8 — Anthropic)")
+            jarvis = JarvisClaude(ui)
+            try:
+                jarvis.run()
+            except KeyboardInterrupt:
+                print("\n🔴 Shutting down...")
+        elif use_openai or (pref == "openai" and _get_openai_api_key()):
             print("[JARVIS] 🧠 Backend: GPT-4o (OpenAI)")
             jarvis = JarvisOpenAI(ui)
             try:

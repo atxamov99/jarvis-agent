@@ -39,7 +39,7 @@ _UA = (
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+        return json.load(f)["openai_api_key"]
 
 
 # ── Backend 1: Wikipedia ──────────────────────────────────────────────────────
@@ -75,55 +75,34 @@ def _wikipedia_summary(query: str) -> str | None:
     return None
 
 
-# ── Backend 2: Gemini google_search ───────────────────────────────────────────
+# ── Backend 2: OpenAI web search ─────────────────────────────────────────────
 
 def _gemini_search(query: str) -> str:
-    from google import genai
-    from google.genai import types
+    """Search the web using OpenAI gpt-4o-search-preview."""
+    from actions.openai_client import get_client
+    client = get_client()
 
-    client = genai.Client(api_key=_get_api_key())
-
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=query,
-        config=types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-            # Force the model to actually use the tool and give substantive output
-            system_instruction=(
-                "You MUST search the web and return a substantive, factual answer. "
-                "Use the google_search tool aggressively. Never say 'I don't know' — "
-                "if the first query yields nothing, refine it and search again. "
-                "Cite sources when possible. Respond in the same language the user used."
-            ),
-        ),
-    )
-
-    # Extract text from all parts (Gemini sometimes splits across thought/text parts)
-    text_parts: list[str] = []
-    sources: list[str] = []
     try:
-        cand = response.candidates[0]
-        for part in cand.content.parts:
-            t = getattr(part, "text", None)
-            if t and t.strip():
-                text_parts.append(t.strip())
-        # Pull grounding URLs if available
-        gm = getattr(cand, "grounding_metadata", None)
-        if gm and getattr(gm, "grounding_chunks", None):
-            for chunk in gm.grounding_chunks[:5]:
-                web = getattr(chunk, "web", None)
-                if web and getattr(web, "uri", None):
-                    sources.append(web.uri)
-    except Exception:
-        pass
-
-    text = "\n".join(text_parts).strip()
-    if not text:
-        raise ValueError("Gemini returned an empty response.")
-
-    if sources:
-        text += "\n\nManbalar:\n" + "\n".join(f"  • {u}" for u in sources)
-    return text
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You MUST search the web and return a substantive, factual answer. "
+                        "Never say 'I don\'t know'. Cite sources when possible. "
+                        "Respond in the same language the user used."
+                    ),
+                },
+                {"role": "user", "content": query},
+            ],
+        )
+        text = (response.choices[0].message.content or "").strip()
+        if not text:
+            raise ValueError("OpenAI returned an empty response.")
+        return text
+    except Exception as e:
+        raise ValueError(f"OpenAI search failed: {e}")
 
 
 # ── Backend 3: DuckDuckGo with retry ──────────────────────────────────────────
@@ -321,7 +300,7 @@ def _gpt4o_search(query: str) -> str | None:
             return None
         client = get_client()
         resp = client.chat.completions.create(
-            model="gpt-4o-search-preview",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": query}],
         )
         text = (resp.choices[0].message.content or "").strip()

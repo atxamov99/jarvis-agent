@@ -16,10 +16,10 @@ API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 
 class ErrorDecision(Enum):
-    RETRY       = "retry"      
-    SKIP        = "skip"       
-    REPLAN      = "replan"     
-    ABORT       = "abort"    
+    RETRY       = "retry"
+    SKIP        = "skip"
+    REPLAN      = "replan"
+    ABORT       = "abort"
 
 
 ERROR_ANALYST_PROMPT = """You are the error recovery module of MARK XXV AI assistant.
@@ -51,7 +51,12 @@ Return ONLY valid JSON:
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+        return json.load(f)["openai_api_key"]
+
+
+def _openai_client():
+    from openai import OpenAI
+    return OpenAI(api_key=_get_api_key())
 
 
 def analyze_error(
@@ -60,27 +65,6 @@ def analyze_error(
     attempt: int = 1,
     max_attempts: int = 2
 ) -> dict:
-    """
-    Analyzes a failed step and returns a recovery decision.
-
-    Args:
-        step         : The step dict that failed
-        error        : Error message/traceback
-        attempt      : Current attempt number
-        max_attempts : How many times we've already tried
-
-    Returns:
-        {
-            "decision": ErrorDecision,
-            "reason": str,
-            "fix_suggestion": str,
-            "max_retries": int,
-            "user_message": str
-        }
-    """
-    from google import genai
-    from google.genai import types
-
     if attempt >= max_attempts:
         print(f"[ErrorHandler] ⚠️ Max attempts reached for step {step.get('step')} — forcing replan")
         return {
@@ -91,7 +75,7 @@ def analyze_error(
             "user_message":  "Trying a different approach, sir."
         }
 
-    client = genai.Client(api_key=_get_api_key())
+    client = _openai_client()
 
     prompt = f"""Failed step:
 Tool: {step.get('tool')}
@@ -105,13 +89,15 @@ Error:
 Attempt number: {attempt}"""
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=prompt,
-            config=types.GenerateContentConfig(system_instruction=ERROR_ANALYST_PROMPT),
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": ERROR_ANALYST_PROMPT},
+                {"role": "user",   "content": prompt},
+            ],
         )
-        text = response.text.strip()
-        text     = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
+        text = response.choices[0].message.content.strip()
+        text = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
 
         result = json.loads(text)
         decision_str = result.get("decision", "replan").lower()
@@ -122,7 +108,6 @@ Attempt number: {attempt}"""
             "abort":  ErrorDecision.ABORT,
         }
         result["decision"] = decision_map.get(decision_str, ErrorDecision.REPLAN)
-
 
         if step.get("critical") and result["decision"] == ErrorDecision.SKIP:
             result["decision"]     = ErrorDecision.REPLAN
@@ -143,15 +128,7 @@ Attempt number: {attempt}"""
 
 
 def generate_fix(step: dict, error: str, fix_suggestion: str) -> dict:
-    """
-    When decision is REPLAN and a fix suggestion exists,
-    generates a replacement step using generated_code as fallback.
-
-    Returns a modified step dict.
-    """
-    from google import genai
-
-    client = genai.Client(api_key=_get_api_key())
+    client = _openai_client()
 
     prompt = f"""A task step failed. Generate a replacement step.
 
@@ -167,11 +144,13 @@ Write a Python script that accomplishes the same goal differently.
 Return ONLY the Python code, no explanation."""
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "user", "content": prompt},
+            ],
         )
-        code = response.text.strip()
+        code = response.choices[0].message.content.strip()
         code = re.sub(r"```(?:python)?", "", code).strip().rstrip("`").strip()
 
         return {

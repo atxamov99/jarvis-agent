@@ -687,15 +687,69 @@ class _BrowserSession:
             return await self.go_to(url)
         return "New tab opened."
 
+    async def _foreground_page(self) -> Optional[Page]:
+        """Return the tab the user is actually looking at (visibilityState=visible).
+
+        The user may open/switch tabs manually, so self._page (the last tab JARVIS
+        navigated) is often NOT what's in front. We pick the visible one instead.
+        """
+        ctx = self._context
+        if ctx is None:
+            return await self._get_page()
+        live = [p for p in ctx.pages if not p.is_closed()]
+        for p in live:
+            try:
+                if await p.evaluate("document.visibilityState") == "visible":
+                    return p
+            except Exception:
+                continue
+        if self._page and not self._page.is_closed():
+            return self._page
+        return live[-1] if live else None
+
     async def close_tab(self) -> str:
-        page = self._page
-        if page and not page.is_closed():
-            ctx   = page.context
-            await page.close()
-            pages = ctx.pages
-            self._page = pages[-1] if pages else None
-            return "Tab closed."
-        return "No active tab to close."
+        """Close ONLY the foreground tab (never the whole browser)."""
+        ctx = self._context
+        page = await self._foreground_page()
+        if not page or page.is_closed():
+            return "No active tab to close."
+        live_before = [p for p in (ctx.pages if ctx else []) if not p.is_closed()]
+        await page.close()
+        pages = [p for p in (ctx.pages if ctx else []) if not p.is_closed()]
+        self._page = pages[-1] if pages else None
+        if len(live_before) <= 1:
+            return "Tab closed (it was the last tab)."
+        return "Tab closed."
+
+    async def media_control(self, what: str = "toggle") -> str:
+        """Play / pause / resume video or audio on the foreground tab.
+
+        Uses the HTMLMediaElement API directly (v.play()/v.pause()) which reliably
+        RESUMES a paused video — unlike MPRIS or key presses, which often only stop.
+        Falls back to the YouTube 'k' shortcut if no media element is found.
+        """
+        page = await self._foreground_page()
+        if not page or page.is_closed():
+            return "No active page for media control."
+        js_map = {
+            "play":   "(()=>{let n=0;document.querySelectorAll('video,audio').forEach(v=>{try{v.play()}catch(e){}; n++});return n})()",
+            "pause":  "(()=>{let n=0;document.querySelectorAll('video,audio').forEach(v=>{v.pause(); n++});return n})()",
+            "toggle": "(()=>{let n=0;document.querySelectorAll('video,audio').forEach(v=>{v.paused?v.play():v.pause(); n++});return n})()",
+        }
+        js = js_map.get(what, js_map["toggle"])
+        try:
+            count = await page.evaluate(js)
+            if not count:
+                try:
+                    await page.bring_to_front()
+                    await page.keyboard.press("k")   # YouTube play/pause shortcut
+                    return "Media toggled (keyboard fallback)."
+                except Exception:
+                    return "No video/audio found on this page."
+            verb = {"play": "resumed", "pause": "paused", "toggle": "toggled"}.get(what, what)
+            return f"Video {verb}."
+        except Exception as e:
+            return f"Media control error: {e}"
 
     async def screenshot(self, path: str = None) -> str:
         page = await self._get_page()
@@ -863,6 +917,12 @@ def browser_control(
             result = sess.run(sess.new_tab(params.get("url", "")))
         elif action == "close_tab":
             result = sess.run(sess.close_tab())
+        elif action in ("media_play", "resume", "play_video", "continue"):
+            result = sess.run(sess.media_control("play"))
+        elif action in ("media_pause", "pause_video"):
+            result = sess.run(sess.media_control("pause"))
+        elif action in ("media_toggle", "play_pause", "toggle_play"):
+            result = sess.run(sess.media_control("toggle"))
         elif action == "screenshot":
             result = sess.run(sess.screenshot(params.get("path")))
         elif action == "back":

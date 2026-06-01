@@ -1,16 +1,13 @@
-"""summarizer.py — Summarize web pages or plain text via Gemini."""
+"""summarizer.py — Summarize web pages or plain text via OpenAI."""
 import json
 import re
 import urllib.request
 from pathlib import Path
 
 
-def _load_gemini_key() -> str | None:
-    cfg = Path(__file__).parent.parent / "config" / "api_keys.json"
-    try:
-        return json.loads(cfg.read_text())["gemini_api_key"]
-    except Exception:
-        return None
+def _get_client():
+    from actions.openai_client import get_client
+    return get_client()
 
 
 def _fetch_text(url: str, max_chars: int = 12000) -> str:
@@ -18,7 +15,6 @@ def _fetch_text(url: str, max_chars: int = 12000) -> str:
     with urllib.request.urlopen(req, timeout=15) as resp:
         raw = resp.read().decode("utf-8", errors="replace")
 
-    # Strip HTML tags
     text = re.sub(r"<style[^>]*>.*?</style>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<[^>]+>", " ", text)
@@ -26,30 +22,27 @@ def _fetch_text(url: str, max_chars: int = 12000) -> str:
     return text[:max_chars]
 
 
-def _gemini_summarize(content: str, lang: str = "uz") -> str:
-    from google import genai
-    key = _load_gemini_key()
-    if not key:
-        return "Gemini API kaliti topilmadi."
-
+def _openai_summarize(content: str, lang: str = "uz") -> str:
     lang_instruction = {
         "uz": "O'zbek tilida xulosa yozing.",
         "ru": "Напишите резюме на русском языке.",
         "en": "Write the summary in English.",
     }.get(lang, "O'zbek tilida xulosa yozing.")
 
-    client = genai.Client(api_key=key)
-    prompt = (
-        f"{lang_instruction}\n\n"
-        "Quyidagi matnni 3-5 ta qisqa gapda xulosa qiling. "
-        "Asosiy fikrlarni ajratib ko'rsating.\n\n"
-        f"{content[:10000]}"
+    client = _get_client()
+    resp = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[{
+            "role": "user",
+            "content": (
+                f"{lang_instruction}\n\n"
+                "Quyidagi matnni 3-5 ta qisqa gapda xulosa qiling. "
+                "Asosiy fikrlarni ajratib ko'rsating.\n\n"
+                f"{content[:10000]}"
+            ),
+        }],
     )
-    resp = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-    )
-    return (resp.text or "").strip() or "Xulosa tayyorlab bo'lmadi."
+    return (resp.choices[0].message.content or "").strip() or "Xulosa tayyorlab bo'lmadi."
 
 
 def summarizer(parameters=None, response=None, player=None, session_memory=None) -> str:
@@ -73,4 +66,4 @@ def summarizer(parameters=None, response=None, player=None, session_memory=None)
         content = text
 
     if player: player.write_log(f"[Summarizer] Summarizing {len(content)} chars")
-    return _gemini_summarize(content, lang)
+    return _openai_summarize(content, lang)

@@ -13,7 +13,7 @@ playwright
 pyautogui
 pyperclip
 pygetwindow       
-opencv-python
+opencv-contrib-python   # contrib: cv2.face for LBPH face recognition
 numpy
 mss
 Pillow
@@ -37,3 +37,16 @@ pynput
 yt-dlp
 qrcode[pil]
 pyzbar
+
+# ── Added by feature updates (vision, Claude, math, biometrics) ──
+anthropic              # Claude Opus 4.8 backend
+sympy                  # math_solver symbolic math
+pytz                   # timezone
+scipy
+scikit-learn           # speaker verification GMM
+mediapipe              # gesture_control hand tracking
+deepface               # emotion detection
+tf-keras               # deepface backend
+samsungtvws            # Samsung TV control
+wakeonlan              # Wake-on-LAN for TV
+yfinance               # stocks

@@ -15,27 +15,30 @@ BASE_DIR           = get_base_dir()
 API_CONFIG_PATH    = BASE_DIR / "config" / "api_keys.json"
 DESKTOP            = Path.home() / "Desktop"
 MAX_BUILD_ATTEMPTS = 3
-GEMINI_MODEL       = "gemini-2.5-flash"
+OPENAI_MODEL       = "llama-3.3-70b-versatile"
 
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+        return json.load(f)["openai_api_key"]
 
 
-def _gemini_client():
-    from google import genai
-    return genai.Client(api_key=_get_api_key())
+def _openai_client_local():
+    from actions.openai_client import get_client
+    return get_client()
 
 
-def _generate(prompt: str, model: str = GEMINI_MODEL) -> str:
-    return _gemini_client().models.generate_content(
+def _generate(prompt: str, model: str = OPENAI_MODEL) -> str:
+    client = _openai_client_local()
+    resp = client.chat.completions.create(
         model=model,
-        contents=prompt,
-    ).text
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+    )
+    return resp.choices[0].message.content or ""
 
 
-def _generate_openai(prompt: str, model: str = "gpt-4o") -> str:
+def _generate_openai(prompt: str, model: str = "llama-3.3-70b-versatile") -> str:
     from actions.openai_client import get_client
     client = get_client()
     resp = client.chat.completions.create(
@@ -47,14 +50,8 @@ def _generate_openai(prompt: str, model: str = "gpt-4o") -> str:
 
 
 def _generate_with_fallback(prompt: str) -> str:
-    """Try Gemini first; fall back to GPT-4o on any error."""
-    try:
-        result = _generate(prompt)
-        if result and result.strip():
-            return result
-    except Exception as e:
-        print(f"[Code] ⚠️ Gemini failed ({e}), switching to GPT-4o...")
-    return _generate_openai(prompt)
+    """Use OpenAI GPT-4o."""
+    return _generate(prompt)
 
 
 def _clean_code(text: str) -> str:
@@ -578,13 +575,14 @@ def _screen_debug_action(description, file_path, player, speak=None) -> str:
             print(f"[Code] ⚠️ Could not read file: {err}")
 
     try:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=_get_api_key())
+        import base64
+        from actions.openai_client import _load_config
+        _cfg = _load_config()
+        _oai_key = _cfg.get("openai_api_key", "")
+        _gem_key = _cfg.get("gemini_api_key", "")
 
         image_bytes  = screenshot_path.read_bytes()
-        image_base64 = _image_to_base64(screenshot_path)
+        img_b64      = base64.b64encode(image_bytes).decode()
 
         user_question = description or "What error or problem do you see on the screen? How can it be fixed?"
 
@@ -604,17 +602,18 @@ Please:
 
 Be specific and actionable. If you see an error message, quote it exactly."""
 
-        contents = [
-            types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-            analysis_prompt,
-        ]
-
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=contents,
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+                    {"type": "text", "text": analysis_prompt},
+                ],
+            }],
         )
 
-        analysis = response.text.strip()
+        analysis = response.choices[0].message.content.strip()
         print(f"[Code] ✅ Screen analysis complete")
 
         try:
